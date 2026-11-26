@@ -84,19 +84,23 @@ test('CPU戦績とPRO通信対戦の通算は別枠で、リセットしても�
   assert.equal(online.onlineLosses, 1);
   assert.equal(online.onlineGoals, 1);
   assert.equal(online.onlineConceded, 2);
-  assert.equal(online.points, 0, '負けでポイントは減らない下限0');
+  assert.equal(online.points, 0, '5本以内の敗北は0pt（マイナスにならない）');
 
   const win = addOnlineResult(online, { winner: 'me', goals: 4, conceded: 2 });
-  assert.equal(win.points, 25);
+  assert.equal(win.points, 3, 'Build 4: 5本以内の勝利は+3pt');
   assert.equal(win.onlineStreak, 1);
   assert.equal(win.onlineBestStreak, 1);
+
+  /* Build 4: サドンデスは勝ち+2 / 負け+1 */
+  assert.equal(addOnlineResult(win, { winner: 'me', goals: 6, conceded: 5, sudden: true }).points, 5);
+  assert.equal(addOnlineResult(win, { winner: 'opp', goals: 5, conceded: 6, sudden: true }).points, 4);
 
   const storage = fakeStorage();
   const afterReset = resetRecord(storage, win);
   for (const key of CPU_RECORD_KEYS) assert.equal(afterReset[key], 0, key);
   assert.equal(afterReset.onlinePlayed, 2);
   assert.equal(afterReset.onlineWins, 1);
-  assert.equal(afterReset.points, 25);
+  assert.equal(afterReset.points, 3);
   assert.deepEqual(loadRecord(storage), afterReset, '保存された値も同じ');
 
   /* 旧バージョンの保存値（CPUだけ）を読んでも壊れない */

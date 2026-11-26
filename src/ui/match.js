@@ -3,7 +3,7 @@
 import { CONFIG } from '../config.js';
 import { DIRECTIONS, pkBoard, kickerNumber, phase, mirrorDirection } from '../core/rules.js';
 import { getCountry, countryName } from '../core/countries.js';
-import { flag, icon, esc } from './layout.js';
+import { flag, flagEmoji, icon, esc } from './layout.js';
 
 const STAMPS = ['hello', 'nice', 'oops', 'gg', 'thanks', 'wow'];
 const STAMP_FACE = {
@@ -184,6 +184,26 @@ function logRow({ t, event, index, mine, meCode, oppCode, kickerFor, language })
   </div>`;
 }
 
+/**
+ * 結果のシェア文面（Build 4）。
+ * 国旗絵文字・勝敗・PKスコア・サドンデスなら本数・#SHOOTOUT4・IPKSF を1つの文に。
+ * 画像は作らない（テキストだけなので軽く、どの環境でも確実に共有できる）。
+ */
+export function buildShareText({ t, state, prefs, language }) {
+  const me = getCountry(prefs.country);
+  const oppCode = prefs.opponent || 'BR';
+  const win = state.winner === 'me';
+  const sudden = state.kicks.me.length > CONFIG.kickers || state.kicks.opp.length > CONFIG.kickers;
+  const score = `${state.score.me}-${state.score.opp}`;
+  return [
+    `${flagEmoji(me.code)} ${t(win ? 'victory' : 'defeat')} ${score} ${flagEmoji(oppCode)}`,
+    `${countryName(me.code, language)} vs ${countryName(oppCode, language)}`,
+    sudden ? t('shareSudden', { kicks: Math.max(state.kicks.me.length, state.kicks.opp.length) }) : '',
+    'IPKSF · SHOOTOUT 4',
+    '#SHOOTOUT4 #IPKSF',
+  ].filter(Boolean).join('\n');
+}
+
 export function resultView({ t, state, record, language, prefs, online = false, kickerFor = null }) {
   const me = getCountry(prefs.country);
   const oppCode = prefs.opponent || 'BR';
@@ -235,6 +255,7 @@ export function resultView({ t, state, record, language, prefs, online = false, 
 
     <div class="result__actions">
       <button class="btn btn--primary btn--xl" data-action="rematch" data-testid="rematch">${icon('play')}<span>${esc(t('rematch'))}</span></button>
+      <button class="btn btn--ghost" data-action="share-result" data-testid="share-result">${icon('share')}<span>${esc(t('shareResult'))}</span></button>
       <button class="btn btn--ghost" data-action="home">${esc(t('backHome'))}</button>
     </div>
   </div>`;

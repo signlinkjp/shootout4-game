@@ -12,8 +12,11 @@ import {
 } from './core/rules.js';
 import { chooseCPU } from './core/cpu.js';
 import {
-  COUNTRIES, getCountry, pickOpponent, countryName, isCountryUnlocked,
+  COUNTRIES, getCountry, pickOpponent, countryName, isCountryUnlocked, hairSpecForCountry,
 } from './core/countries.js';
+import {
+  TABS, rankTable, seasonInfo, rollStanding, emptyRow, medalFor,
+} from './core/ranking.js';
 import {
   DEFAULT_SKIN, normalizeSkin, readSkin, saveSkin, effectiveSkin, isPartUnlocked,
   isCharacterUnlocked, getCharacter,
@@ -24,12 +27,13 @@ import {
 } from './core/registration.js';
 import {
   openStorage, loadPrefs, savePrefs, loadRecord, saveRecord, addResult, addOnlineResult,
-  resetRecord, EMPTY_RECORD, TEXT_SIZES, SIZE_SCALE,
+  resetRecord, EMPTY_RECORD, TEXT_SIZES, SIZE_SCALE, loadStanding, saveStanding, recordStanding,
+  loadShots, saveShots, addShotDirection, shotSummary,
 } from './storage.js';
 import {
   unlockAudio, configureAudio, click, select as selectSound, whistle, kickSound, netSound,
   gloveSound, goalRoar, saveGroan, countdownTick, startCrowd, stopCrowd, crowdSurge,
-  openingCrowd, audioState, uiSwitch, purchaseChime, testSound,
+  openingCrowd, audioState, uiSwitch, purchaseChime, testSound, voice, ensureAudioRunning,
   suspendForBackground, resumeFromBackground,
 } from './audio.js';
 import {
@@ -38,13 +42,13 @@ import {
 } from './platform/iap.js';
 import {
   RealtimeClient, ShootoutSession, RankingNet, onlineConfig, onlineConfigured, normalizeCode,
-  randomCode, isValidCode, rankTable, ONLINE_TURN_MS,
+  randomCode, isValidCode, ONLINE_TURN_MS,
 } from './net/online.js';
 import { createStadium } from './three/stadium.js';
 import { createPreview } from './three/preview.js';
 import { homeView } from './ui/home.js';
 import { countryView } from './ui/country.js';
-import { matchView, resultView, pkCellList, shownDirection } from './ui/match.js';
+import { matchView, resultView, pkCellList, shownDirection, buildShareText } from './ui/match.js';
 import { lockerView } from './ui/locker.js';
 import { registerView } from './ui/register.js';
 import { proView } from './ui/pro.js';
@@ -61,6 +65,8 @@ const storage = openStorage();
 const deviceLanguages = (typeof navigator !== 'undefined' && (navigator.languages || [navigator.language])) || [];
 let prefs = loadPrefs(storage, deviceLanguages);
 let record = loadRecord(storage);
+let standing = loadStanding(storage);
+let shots = loadShots(storage);
 let entitled = initialEntitlement();
 let skin = effectiveSkin(readSkin(storage), entitled);
 let registration = readRegistration(storage);
@@ -76,7 +82,7 @@ let stadium = null;
 let match = null;
 let session = null;
 let client = null;
-let online = { mode: 'menu', scope: 'domestic', code: '', status: '', opponent: null, searching: false, room: '' };
+let online = { mode: 'menu', scope: 'domestic', code: '', status: '', opponent: null, searching: false, room: '', rankTab: 'total' };
 let rankRows = [];
 let rankStatus = '';
 let proStatus = '';
@@ -143,6 +149,7 @@ function currentView() {
       return lockerView({
         t, entitled, draft, language: prefs.language, registered: isRegistered(registration),
         order: prefs.order === 'second' ? 'second' : 'first',
+        hair: hairSpecForCountry(registration.country || prefs.country),
       });
     case 'register':
       return registerView({ t, draft: registerDraft, prefs, language: prefs.language, back: registerBack });
@@ -150,10 +157,20 @@ function currentView() {
       return proView({ t, entitled, language: prefs.language, diagnostic: proDiagState, price: proPrice });
     case 'online':
       return onlineView({ t, entitled, language: prefs.language, state: online, registered: isRegistered(registration), officialCountry: officialCountry(registration, prefs.country) });
-    case 'rank':
-      return rankView({ t, table: rankTable(rankRows, myRankRow()), entitled, language: prefs.language, status: rankStatus });
+    case 'rank': {
+      const tab = TABS.includes(online.rankTab) ? online.rankTab : 'total';
+      refreshStandingPeriods();
+      const table = rankTable(rankRows, myRankRow(), { tab });
+      return rankView({
+        t, table, entitled, language: prefs.language, status: rankStatus,
+        tab, scope: online.scope,
+        season: seasonInfo(tab, { language: prefs.language, t }),
+        you: table.find((row) => row.isMe) || null,
+        medal: medalFor,
+      });
+    }
     case 'stats':
-      return statsView({ t, record });
+      return statsView({ t, record, shots });
     case 'settings':
       return settingsView({ t, prefs, entitled, registered: isRegistered(registration) });
     case 'rules':
@@ -191,12 +208,14 @@ function attachLockerPreview() {
   const canvas = $('#locker-preview');
   const lineup = $('#locker-lineup');
   if (!canvas) return;
-  const key = `${draft.character}|${draft.shirt}|${draft.shorts}|${draft.socks}|${draft.boots}`;
+  const hair = hairSpecForCountry(registration.country || prefs.country);
+  const key = `${draft.character}|${draft.shirt}|${draft.shorts}|${draft.socks}|${draft.boots}|${hair.style}|${hair.color}`;
   const changed = Boolean(lockerPreviewKey) && lockerPreviewKey !== key;
   lockerPreviewKey = key;
   lockerPreview = createPreview(canvas, {
     style: draft.character,
     kit: { shirt: draft.shirt, shorts: draft.shorts, socks: draft.socks, boots: draft.boots },
+    hair,
     animate: changed,
   });
   if (!lockerPreview.available) {
@@ -257,7 +276,7 @@ function attackingSide() {
   return match && match.state.turn === 'me' ? 'me' : 'opp';
 }
 
-/** 4部位 + キャラクター + 両チームの利き足を3Dへ渡す（すべて見た目だけ） */
+/** 4部位 + キャラクター + 両チームの利き足・国別の髪を3Dへ渡す（すべて見た目だけ） */
 function updateStadiumTeams() {
   if (!stadium || !match) return;
   const round = match.state.history.length;
@@ -268,6 +287,8 @@ function updateStadiumTeams() {
     oppCountry: getCountry(prefs.opponent || 'BR').kit,
     footed: kickerInfo('me', kickerNumber(match.state, 'me'), round).foot,
     opponentFooted: kickerInfo('opp', kickerNumber(match.state, 'opp'), round).foot,
+    hair: hairSpecForCountry(registration.country || prefs.country),
+    oppHair: hairSpecForCountry(prefs.opponent || 'BR'),
   });
 }
 
@@ -313,6 +334,7 @@ function startMatch({ onlineMatch = false } = {}) {
     timerId: 0,
     deadline: 0,
     applied: 0,
+    roundId: 0,
     nextTimer: null,
     waitingOpponent: false,
     lastRole: null,
@@ -331,6 +353,7 @@ function beginRound() {
   if (!match) return;
   stopRound();
   const state = match.state;
+  match.roundId += 1;
   match.selection = null;
   match.confirmed = false;
   match.waitingOpponent = false;
@@ -642,12 +665,45 @@ function applyKick(shot, save, { timeout = false, stuck = false } = {}) {
   const role = match.role || currentRole();
   const foot = kickerInfo(event.side, event.kicker, event.index).foot;
 
+  /* Build 4: 自分が蹴った方向を数える（「戦績」のキック傾向） */
+  if (role === 'shoot' && event.side === 'me' && DIRECTIONS.includes(event.shot)) {
+    shots = addShotDirection(shots, event.shot);
+    saveShots(storage, shots);
+  }
+
   match.selection = null;
   match.confirmed = true;
-  updateHud();
-  updateBoard();
-  markReveal(event, role);
+  const roundId = match.roundId;
+  const bannerKind = event.miss ? 'miss' : (event.goal ? 'goal' : 'save');
+
+  /*
+   * Build 4（最重要）: 蹴り始めに分かるのは「自分が選んだボタン」だけ。
+   * 相手の方向（is-cpu）・結果テキスト・HUDスコア・PK表・バナーは、
+   * ボールがゴールに届いた瞬間（onImpact）にまとめて出す。
+   * 遅れて届いた演出で、次のラウンドを塗り替えないよう roundId で確認する。
+   */
+  let revealed = false;
+  const reveal = () => {
+    if (revealed) return;
+    revealed = true;
+    if (!match || match.roundId !== roundId || screen !== 'match') return;
+    markReveal(event, role);
+    /* スコアとPK表だけ更新する（キッカー表示は蹴った選手のまま残す） */
+    updateHud({ chip: false });
+    updateBoard();
+    if (timeout) {
+      setKickStatus(t(event.miss ? 'timeoutMiss' : event.stuck ? 'timeoutStuck' : 'timeoutMiss'));
+    }
+    showBanner(bannerKind);
+  };
+
   if (timeout) setKickStatus(t(event.miss ? 'timeoutMiss' : event.stuck ? 'timeoutStuck' : 'timeoutMiss'));
+
+  /* 判定のボイス（ゴール！/ セーブ！/ ミス！）は着弾に合わせて鳴らす */
+  const announce = () => {
+    const text = bannerKind === 'miss' ? t('voiceMiss') : t(bannerKind === 'goal' ? 'goal' : 'save');
+    voice(bannerKind, { text, language: prefs.language });
+  };
 
   let animation = null;
   if (stadium) {
@@ -664,6 +720,10 @@ function applyKick(shot, save, { timeout = false, stuck = false } = {}) {
         if (kind === 'goal') { netSound(); goalRoar(2.4); crowdSurge(1.1); }
         if (kind === 'save') { gloveSound(); saveGroan(); }
         if (kind === 'miss') { gloveSound(); saveGroan(); }
+        if (kind === 'goal' || kind === 'save' || kind === 'miss') {
+          announce();
+          reveal();
+        }
       },
     });
   } else {
@@ -671,16 +731,15 @@ function applyKick(shot, save, { timeout = false, stuck = false } = {}) {
     setTimeout(() => {
       if (event.goal) { netSound(); goalRoar(2.2); }
       else { gloveSound(); saveGroan(); }
-    }, 260);
+      announce();
+      reveal();
+    }, 300);
   }
-
-  const bannerKind = event.miss ? 'miss' : (event.goal ? 'goal' : 'save');
-  setTimeout(() => showBanner(bannerKind), stadium ? 780 : 320);
 
   const token = next.history.length;
   const finish = () => {
     /* すでに次のキックへ進んでいた／別の画面へ移った場合は、遅れて届いた演出で進めない */
-    if (!match || screen !== 'match' || match.state.history.length !== token) return;
+    if (!match || screen !== 'match' || match.roundId !== roundId || match.state.history.length !== token) return;
     /* 検証（スクショ）用に時計を止めている間は、自動で次のキックへ進まない */
     if (match.hold) return;
     const nextBtn = $('#next-kick');
@@ -739,7 +798,9 @@ function finishMatch() {
   const sudden = state.kicks.me.length > CONFIG.kickers || state.kicks.opp.length > CONFIG.kickers;
   if (match.online) {
     /* 通信対戦は「PRO 通信対戦 通算」へ別枠で記録（CPU戦績には足さない） */
-    record = addOnlineResult(record, { winner: state.winner, goals, conceded });
+    record = addOnlineResult(record, { winner: state.winner, goals, conceded, sudden });
+    /* IPKSF ランキング（Build 4）: 勝ち点 3/2/1/0 を累積・月間・週間に積む */
+    standing = recordStanding(storage, standing, { winner: state.winner, goals, conceded, sudden });
   } else {
     record = addResult(record, { winner: state.winner, goals, conceded, saves, shots, sudden });
   }
@@ -772,7 +833,7 @@ function quitMatch() {
   });
 }
 
-function updateHud() {
+function updateHud({ chip = true } = {}) {
   if (!match) return;
   const me = $('#hud-me');
   const opp = $('#hud-opp');
@@ -785,7 +846,7 @@ function updateHud() {
       : (match.state.first === 'me' ? t('firstKick') : t('secondKick'));
   }
   const kickerChip = $('#kicker-chip');
-  if (kickerChip) {
+  if (kickerChip && chip) {
     const role = currentRole();
     const side = role === 'shoot' ? 'me' : 'opp';
     const number = kickerNumber(match.state, side);
@@ -992,15 +1053,28 @@ function leaveOnlineMatch() {
   go('online');
 }
 
+function refreshStandingPeriods(date = new Date()) {
+  const { standing: rolled, changed } = rollStanding(standing, date);
+  if (changed) {
+    standing = rolled;
+    saveStanding(storage, standing);
+  }
+  return standing;
+}
+
 function myRankRow() {
   const country = officialCountry(registration, prefs.country);
-  return {
+  const current = refreshStandingPeriods();
+  const base = emptyRow({
     id: rankId(),
     nickname: registration.userName || registration.teamName || prefs.nickname || countryName(country, prefs.language),
     countryCode: country,
-    points: record.points || 0,
-    wins: record.onlineWins || 0,
-    losses: record.onlineLosses || 0,
+  }, new Date(), Date.now());
+  return {
+    ...base,
+    total: { ...current.total },
+    month: { ...current.month },
+    week: { ...current.week },
     updatedAt: Date.now(),
   };
 }
@@ -1020,16 +1094,21 @@ function rankId() {
 }
 
 function openRank() {
-  if (!entitled) {
-    go('rank');
-    return;
-  }
   go('rank');
+  if (!entitled) return;
+  refreshRank();
+}
+
+/** ランキングの通信を（選択中の世界/国内で）開き直す */
+function refreshRank() {
+  if (!entitled) return;
   if (!onlineConfigured()) {
     rankStatus = t('onlineNotConfigured');
+    if (screen === 'rank') render();
     return;
   }
   ensureSession();
+  rankNet?.close();
   rankNet = new RankingNet({
     client,
     onRows: (rows) => {
@@ -1042,6 +1121,37 @@ function openRank() {
   rankRows = rankNet.cached();
   rankNet.open({ scope: online.scope, row: myRankRow() });
   rankStatus = rankRows.length ? '' : t('searching');
+  if (screen === 'rank') render();
+}
+
+/* ------------------------------------------------------------------ *\
+ * 結果のシェア（Build 4）
+ *   Web Share API があればそのまま共有、無ければ文面をクリップボードへ。
+ *   画像は作らず、テキストだけ（軽い・確実・どこでも動く）。
+ * ------------------------------------------------------------------ */
+
+async function shareResult() {
+  if (!match) return 'none';
+  const text = buildShareText({ t, state: match.state, prefs, language: prefs.language });
+  const title = `${CONFIG.title} · ${CONFIG.brand}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title, text });
+      return 'shared';
+    }
+  } catch (error) {
+    /* キャンセルは何もしない。他の失敗はコピーへ切り替える */
+    if (error && error.name === 'AbortError') return 'cancelled';
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(t('copied'));
+    return 'copied';
+  } catch {
+    /* クリップボードも使えない環境では、文面をトーストで見せる */
+    toast(text);
+    return 'shown';
+  }
 }
 
 /* ------------------------------------------------------------------ *\
@@ -1289,6 +1399,8 @@ function onAppVisible() {
   appHidden = false;
   resumeFromBackground({ crowd: screen === 'match' && Boolean(match) && !match.confirmed });
   if (prefs.sound || prefs.bgm) configureAudio(prefs);
+  /* Build 4: 戻った直後に AudioContext が suspended のままでも、次の操作で必ず起こす */
+  if (prefs.sound || prefs.bgm) ensureAudioRunning();
   resumeRound();
   document.documentElement.dataset.background = 'false';
   return true;
@@ -1411,7 +1523,18 @@ app.addEventListener('click', async (event) => {
   const scopeButton = event.target.closest('button[data-scope]');
   if (scopeButton) {
     online.scope = scopeButton.dataset.scope;
+    if (screen === 'rank') refreshRank();
     render();
+    return;
+  }
+  const rankTabButton = event.target.closest('button[data-rank-tab]');
+  if (rankTabButton) {
+    const tab = rankTabButton.dataset.rankTab;
+    if (TABS.includes(tab)) {
+      online.rankTab = tab;
+      uiSwitch();
+      render();
+    }
     return;
   }
   const toggle = event.target.closest('button[data-toggle]');
@@ -1523,6 +1646,9 @@ app.addEventListener('click', async (event) => {
     case 'rank':
       openRank();
       break;
+    case 'share-result':
+      await shareResult();
+      break;
     case 'stats':
       go('stats');
       break;
@@ -1556,6 +1682,8 @@ app.addEventListener('click', async (event) => {
           /* private mode */
         }
         prefs = loadPrefs(storage, deviceLanguages);
+        standing = loadStanding(storage);
+        shots = loadShots(storage);
         registration = { ...DEFAULT_REGISTRATION, teammates: DEFAULT_REGISTRATION.teammates.map((item) => ({ ...item })) };
         registerDraft = { ...registration, teammates: registration.teammates.map((item) => ({ ...item })) };
         skin = { ...DEFAULT_SKIN };
@@ -1664,6 +1792,17 @@ window.addEventListener('pageshow', () => { if (!document.hidden) onAppVisible()
 window.addEventListener('blur', onAppHidden);
 window.addEventListener('focus', () => { if (!document.hidden) onAppVisible(); });
 
+/*
+ * Build 4: タップ・クリック・キー入力のたびに、AudioContext が suspend なら
+ * resume する（バックグラウンドから戻って最初の操作で必ず音が戻る安全策）。
+ */
+['pointerdown', 'touchstart', 'keydown'].forEach((type) => {
+  document.addEventListener(type, () => {
+    if (!prefs.sound && !prefs.bgm) return;
+    ensureAudioRunning();
+  }, { capture: true, passive: true });
+});
+
 /* デバッグ / 実ブラウザ検証用（画面には出さない） */
 window.__SHOOTOUT__ = {
   version: CONFIG.version,
@@ -1746,6 +1885,25 @@ window.__SHOOTOUT__ = {
     };
   },
   get audio() { return audioState(); },
+  /* Build 4: ランキング（勝ち点）とキック傾向（4択） */
+  get standing() { return JSON.parse(JSON.stringify(standing)); },
+  get shots() { return { ...shots }; },
+  get shotTendency() { return shotSummary(shots); },
+  get rankingTab() { return online.rankTab; },
+  setRankTab: (tab) => {
+    if (TABS.includes(tab)) {
+      online.rankTab = tab;
+      render();
+    }
+    return online.rankTab;
+  },
+  rank: (tab) => rankTable(rankRows, myRankRow(), { tab: tab || online.rankTab }),
+  season: (tab) => seasonInfo(tab || online.rankTab, { language: prefs.language, t }),
+  refreshRank: () => { refreshRank(); return rankRows.length; },
+  shareText: () => (match ? buildShareText({ t, state: match.state, prefs, language: prefs.language }) : ''),
+  share: () => shareResult(),
+  voice: (kind, text) => voice(kind || 'goal', { text: text || t('goal'), language: prefs.language }),
+  ensureAudio: () => ensureAudioRunning(),
   get preview() { return lockerPreview ? lockerPreview.snapshot() : { available: false }; },
   appHidden: (value) => (value ? onAppHidden() : onAppVisible()),
   mirror: (dir) => mirrorDirection(dir),

@@ -10,6 +10,10 @@ import { DEFAULT_PREFS } from './config.js';
 import { detectLanguage, isLanguage } from './i18n.js';
 import { isLevel, normalizeLevel } from './core/cpu.js';
 import { COUNTRY_CODES } from './core/countries.js';
+import { DIRECTIONS } from './core/rules.js';
+import {
+  addToTally, emptyStanding, emptyTally, normalizeStanding, pointsFor, rollStanding,
+} from './core/ranking.js';
 
 const PREFIX = 'shootout4.';
 export const KEYS = Object.freeze({
@@ -18,6 +22,9 @@ export const KEYS = Object.freeze({
   pro: `${PREFIX}pro.v1`,
   skin: `${PREFIX}skin.v1`,
   online: `${PREFIX}online.v1`,
+  /* Build 4: IPKSF ランキング（勝ち点の累積）と、キック方向の回数 */
+  standing: `${PREFIX}standing.v1`,
+  shots: `${PREFIX}shots.v1`,
 });
 
 function memoryStorage() {
@@ -177,11 +184,13 @@ export function resetRecord(storage, current = EMPTY_RECORD) {
 
 /**
  * 通信対戦（相手がいる対人戦）の通算を足す（純粋関数）。
- * window の点数もここで動かす（ランキングと通算成績を同じ試合結果から）。
+ * ランキングの勝ち点もここで動かす（IPKSF 公式: 5本以内勝3 / サドンデス勝2 / サドンデス負1 / 5本以内負0）。
+ * sudden = サドンデスにもつれた試合か（6本目以降に入ったか）。
  */
-export function addOnlineResult(record, { winner, goals = 0, conceded = 0 }) {
+export function addOnlineResult(record, { winner, goals = 0, conceded = 0, sudden = false }) {
   const win = winner === 'me';
   const streak = win ? (record.onlineStreak || 0) + 1 : 0;
+  const points = (record.points || 0) + pointsFor({ win, sudden });
   return {
     ...record,
     onlinePlayed: (record.onlinePlayed || 0) + 1,
@@ -191,6 +200,76 @@ export function addOnlineResult(record, { winner, goals = 0, conceded = 0 }) {
     onlineConceded: (record.onlineConceded || 0) + conceded,
     onlineStreak: streak,
     onlineBestStreak: Math.max(record.onlineBestStreak || 0, streak),
-    points: Math.max(0, (record.points || 0) + (win ? 25 : -15)),
+    points: Math.max(0, points),
   };
 }
+
+/* ------------------------------------------------------------------ *\
+ * IPKSF ランキング（Build 4）
+ *   総合・勝率は累積、月間は毎月1日、週間は毎週月曜に自動でリセット。
+ *   保存値が壊れていても落ちない（期間キーが古ければその期間は0）。
+ * ------------------------------------------------------------------ */
+
+export function loadStanding(storage, date = new Date()) {
+  const saved = readJSON(storage, KEYS.standing, null);
+  const { standing } = rollStanding(saved || emptyStanding(date), date);
+  return standing;
+}
+
+export function saveStanding(storage, standing) {
+  return writeJSON(storage, KEYS.standing, standing);
+}
+
+/** 1試合の結果をランキングへ足して保存する（勝敗・得失点・サドンデスか） */
+export function recordStanding(storage, standing, { winner, goals = 0, conceded = 0, sudden = false } = {}, date = new Date()) {
+  const { standing: rolled } = rollStanding(standing, date);
+  const next = {
+    ...rolled,
+    total: addToTally(rolled.total, { win: winner === 'me', sudden, goals, conceded }),
+    month: { key: rolled.month.key, ...addToTally(rolled.month, { win: winner === 'me', sudden, goals, conceded }) },
+    week: { key: rolled.week.key, ...addToTally(rolled.week, { win: winner === 'me', sudden, goals, conceded }) },
+  };
+  saveStanding(storage, next);
+  return next;
+}
+
+/* ------------------------------------------------------------------ *\
+ * キック傾向（自分が蹴った方向の回数）
+ * ------------------------------------------------------------------ */
+
+export const EMPTY_SHOTS = Object.freeze({ TL: 0, TR: 0, BL: 0, BR: 0 });
+
+export function loadShots(storage) {
+  const saved = readJSON(storage, KEYS.shots, {}) || {};
+  const shots = { ...EMPTY_SHOTS };
+  for (const dir of DIRECTIONS) {
+    const value = Number(saved[dir]);
+    shots[dir] = Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+  }
+  return shots;
+}
+
+export function saveShots(storage, shots) {
+  return writeJSON(storage, KEYS.shots, shots);
+}
+
+/** 1本ぶん数える（純粋関数）。4択のどれでもない（枠外）は数えない。 */
+export function addShotDirection(shots, dir) {
+  if (!DIRECTIONS.includes(dir)) return { ...EMPTY_SHOTS, ...shots };
+  const next = { ...EMPTY_SHOTS, ...shots };
+  next[dir] = (Number(next[dir]) || 0) + 1;
+  return next;
+}
+
+/** 合計と割合（%）。合計0なら割合は0。 */
+export function shotSummary(shots) {
+  const safe = { ...EMPTY_SHOTS, ...shots };
+  const total = DIRECTIONS.reduce((sum, dir) => sum + (Number(safe[dir]) || 0), 0);
+  const rows = DIRECTIONS.map((dir) => {
+    const count = Number(safe[dir]) || 0;
+    return { dir, count, rate: total ? Math.round((count / total) * 100) : 0 };
+  });
+  return { total, rows };
+}
+
+export { emptyTally, normalizeStanding };

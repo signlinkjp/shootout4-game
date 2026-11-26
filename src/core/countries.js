@@ -208,6 +208,73 @@ export function countryKit(code) {
   return getCountry(code).kit;
 }
 
+/*
+ * 国別の髪型・髪色（Build 4）。PRO のスタイリッシュ型だけに反映される（無料のブロック型はそのまま）。
+ *
+ * 髪型: short（ショート） / spiky（ツンツン・モヒカン風） / wave（ウェーブ・ミディアム）
+ *       buzz（バズ・坊主） / topknot（トップノット）
+ * 髪色: black / darkbrown / brown / blond / chestnut / ash
+ *
+ * どれも見た目だけ（能力・勝率には触らない）。32か国すべてに、自然な組み合わせを割り当てる。
+ */
+export const HAIR_STYLES = Object.freeze(['short', 'spiky', 'wave', 'buzz', 'topknot']);
+export const HAIR_COLORS = Object.freeze({
+  black: '#15100c',
+  darkbrown: '#2f2016',
+  brown: '#4a2f1c',
+  chestnut: '#6b3f24',
+  blond: '#d3ab63',
+  ash: '#8d877f',
+});
+
+export const COUNTRY_HAIR = Object.freeze({
+  JP: { style: 'short', color: 'black' },
+  BR: { style: 'topknot', color: 'darkbrown' },
+  GB: { style: 'short', color: 'blond' },
+  ES: { style: 'short', color: 'black' },
+  DE: { style: 'short', color: 'blond' },
+  IT: { style: 'wave', color: 'black' },
+  FR: { style: 'short', color: 'darkbrown' },
+  AR: { style: 'short', color: 'darkbrown' },
+  PT: { style: 'wave', color: 'darkbrown' },
+  NL: { style: 'short', color: 'blond' },
+  HR: { style: 'short', color: 'chestnut' },
+  MA: { style: 'wave', color: 'black' },
+  KR: { style: 'spiky', color: 'black' },
+  US: { style: 'short', color: 'brown' },
+  MX: { style: 'short', color: 'black' },
+  NG: { style: 'buzz', color: 'black' },
+  UY: { style: 'short', color: 'chestnut' },
+  BE: { style: 'short', color: 'chestnut' },
+  CO: { style: 'wave', color: 'black' },
+  SN: { style: 'buzz', color: 'black' },
+  CH: { style: 'short', color: 'blond' },
+  DK: { style: 'short', color: 'blond' },
+  PL: { style: 'short', color: 'brown' },
+  AU: { style: 'short', color: 'blond' },
+  SE: { style: 'short', color: 'ash' },
+  EG: { style: 'short', color: 'black' },
+  GH: { style: 'buzz', color: 'black' },
+  CM: { style: 'buzz', color: 'black' },
+  EC: { style: 'short', color: 'black' },
+  CA: { style: 'wave', color: 'brown' },
+  TR: { style: 'spiky', color: 'darkbrown' },
+  AT: { style: 'short', color: 'brown' },
+});
+
+/** 国コードから髪型・髪色を返す（未定義の国は日本） */
+export function hairForCountry(code) {
+  const key = String(code || '').toUpperCase();
+  return COUNTRY_HAIR[key] || COUNTRY_HAIR.JP;
+}
+
+/** 国コードから3D用の髪の指定（色は hex に展開） */
+export function hairSpecForCountry(code) {
+  const spec = hairForCountry(code);
+  const color = HAIR_COLORS[spec.color] || HAIR_COLORS.black;
+  return { style: spec.style, color, tone: spec.color };
+}
+
 export const COUNTRY_TOTAL = COUNTRIES.length;
 export const FREE_COUNTRY_TOTAL = FREE_COUNTRIES.length;
 export const PRO_COUNTRY_TOTAL = PRO_COUNTRIES.length;

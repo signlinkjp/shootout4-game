@@ -3,6 +3,7 @@
 import { CONFIG } from '../config.js';
 import { LANGUAGES, LANGUAGE_NAMES } from '../i18n.js';
 import { DIRECTIONS } from '../core/rules.js';
+import { shotSummary } from '../storage.js';
 import { emblem, esc, icon, screenShell, settingRow, toggleRow } from './layout.js';
 
 export function openingView({ t }) {
@@ -44,15 +45,40 @@ export function rulesView({ t }) {
           <li>${esc(t('proFair'))}</li>
         </ul>
       </section>
+
+      <section class="panel" data-testid="rules-points">
+        <div class="section-head"><h2 class="section-title">${esc(t('pointsRulesTitle'))}</h2></div>
+        <ul class="rulelist">
+          <li><b>${esc(t('pointsRuleWin'))}</b><span>+3pt</span></li>
+          <li><b>${esc(t('pointsRuleSdWin'))}</b><span>+2pt</span></li>
+          <li><b>${esc(t('pointsRuleSdLoss'))}</b><span>+1pt</span></li>
+          <li><b>${esc(t('pointsRuleLoss'))}</b><span>0pt</span></li>
+        </ul>
+        <p class="mini">${esc(t('pointsRuleTie'))}</p>
+        <p class="mini">${esc(t('pointsRuleHow'))}</p>
+      </section>
+
+      <section class="panel ipksf" data-testid="rules-ipksf">
+        <div class="section-head">
+          <h2 class="section-title">${esc(t('ipksfPanelTitle'))}</h2>
+          <span class="stars" aria-hidden="true">★</span>
+        </div>
+        <p class="ipksf__name" data-testid="rules-ipksf-name">${esc(CONFIG.federation)}</p>
+        <p class="ipksf__jp" data-testid="rules-ipksf-full">${esc(t('ipksfName'))}</p>
+        <p class="rules-text">${esc(t('ipksfJoinText'))}</p>
+        <button class="btn btn--gold btn--block" data-action="pro" data-testid="rules-join">${esc(t('proJoin'))}</button>
+        <p class="mini">${esc(t('versionNote'))}</p>
+      </section>
     `,
   });
 }
 
-export function statsView({ t, record }) {
+export function statsView({ t, record, shots = null }) {
   const total = record.played || 0;
   const rate = total ? Math.round((record.wins / total) * 100) : 0;
   const onlineTotal = record.onlinePlayed || 0;
   const onlineRate = onlineTotal ? Math.round(((record.onlineWins || 0) / onlineTotal) * 100) : 0;
+  const tendency = shotSummary(shots || {});
   return screenShell({
     title: t('statsTitle'),
     back: 'home',
@@ -72,6 +98,21 @@ export function statsView({ t, record }) {
         </div>
       </section>
       <button class="btn btn--danger btn--block" data-action="reset-record" data-testid="reset-record">${esc(t('resetStats'))}</button>
+
+      <section class="panel" data-testid="stats-tendency">
+        <div class="section-head"><h2 class="section-title">${esc(t('kickTendencyTitle'))}</h2></div>
+        <p class="mini">${esc(t('kickTendencyNote'))}</p>
+        <div class="tendency">
+          ${tendency.rows.map((row) => `<div class="tendency__row" data-testid="tendency-${row.dir}" data-count="${row.count}" data-rate="${row.rate}">
+            <span class="tendency__label">${esc(t(`zone_${row.dir}`))}</span>
+            <span class="tendency__bar" aria-hidden="true"><i style="width:${row.rate}%"></i></span>
+            <b class="tendency__count">${esc(t('kickTimes', { count: row.count }))}</b>
+            <em class="tendency__rate">${row.rate}%</em>
+          </div>`).join('')}
+        </div>
+        <p class="mini" data-testid="tendency-total">${esc(t('kickTendencyTotal', { count: tendency.total }))}</p>
+        ${tendency.total ? '' : `<p class="mini mini--center">${esc(t('kickTendencyEmpty'))}</p>`}
+      </section>
 
       <section class="panel statpanel statpanel--pro" data-testid="stats-online">
         <div class="section-head">

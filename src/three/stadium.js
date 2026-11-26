@@ -14,7 +14,7 @@ import * as THREE from '../../vendor/three.module.min.js';
 import { ZONES } from '../core/rules.js';
 import { shirtSpec, shortsSpec, socksSpec, bootSpec } from '../core/skins.js';
 import {
-  buildCharacter, applyLook, setFooted, poseKick, poseIdle, resetPose,
+  buildCharacter, applyLook, setFooted, setHair, poseKick, poseIdle, resetPose,
   characterStyleFor, disposeCharacter, CHARACTER_STYLES,
 } from './characters.js';
 import {
@@ -560,6 +560,9 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     style: 'voxel',
     footed: 'right',
     oppFooted: 'right',
+    /* 髪型・髪色（Build 4。国ごとに変える。スタイリッシュ型のみ見た目が変わる） */
+    myHair: { style: 'short', color: '#15100c' },
+    oppHair: { style: 'short', color: '#15100c' },
     oppShirt: { design: 'solid', primary: '#c8102e', secondary: '#ffffff', accent: '#f2c24b', number: '#ffffff' },
     oppShorts: { color: '#c8102e', trim: '#ffffff' },
     oppSocks: { color: '#ffffff', band: '#c8102e' },
@@ -599,9 +602,24 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
   const slots = [
     { x: -7.0, z: 4.3 }, { x: -5.75, z: 4.15 }, { x: -4.5, z: 4.0 }, { x: -3.3, z: 3.9 }, { x: -2.15, z: 3.8 },
   ];
-  /* 助走の開始と、ボールの真横（軸足を置く位置）。右利きは左から、左利きは右から */
-  const SHOOT_START = { x: 1.2, z: 3.4 };
-  const SHOOT_BALL = { x: 0.55, z: 2.55 };
+  /*
+   * 助走（Build 4）。利き足で助走の側・角度・蹴り足をはっきり分ける。
+   *   右利き … ボールの左から入り、右足で振り抜く（軸足は左）
+   *   左利き … ボールの右から入り、左足で振り抜く（軸足は右）
+   * どの値もモーションだけに使う（判定・確率には触らない）。
+   */
+  const RUN_UP = {
+    right: {
+      foot: 'right', side: -1, kickLeg: 1, supportLeg: 0,
+      startX: -1.35, startZ: 3.55, plantX: -0.36, plantZ: 2.62, facing: Math.PI * 0.93,
+    },
+    left: {
+      foot: 'left', side: 1, kickLeg: 0, supportLeg: 1,
+      startX: 1.35, startZ: 3.55, plantX: 0.36, plantZ: 2.62, facing: Math.PI * 1.07,
+    },
+  };
+  const runUpFor = (foot) => (foot === 'left' ? RUN_UP.left : RUN_UP.right);
+  const BALL_SPOT = { x: 0, z: 2.62 };
 
   function buildKickers(style) {
     kickers.forEach((player) => {
@@ -610,7 +628,7 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     });
     kickers.length = 0;
     slots.forEach((slot, index) => {
-      const player = buildCharacter({ style, tone: index, footed: 'right' });
+      const player = buildCharacter({ style, tone: index, footed: 'right', hair: look.myHair });
       player.position.set(slot.x, 0, slot.z);
       player.rotation.y = Math.PI * 0.92;
       player.userData.slot = slot;
@@ -620,7 +638,7 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
   }
 
   function buildKeeper(style) {
-    const next = buildCharacter({ style, keeper: true, tone: 2 });
+    const next = buildCharacter({ style, keeper: true, tone: 2, hair: look.oppHair });
     next.position.set(keeperBase.x + state.keeperOffset * KEEPER_RANGE, 0, keeperBase.z);
     next.userData.home = keeperBase.clone();
     scene.add(next);
@@ -738,7 +756,7 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
    * 見た目の設定（4部位 + キャラクターの種類 + 利き足）。
    * ここに入る値はすべて「見た目」。能力・確率には触らない。
    */
-  function setTeams({ skin: nextSkin, entitled, myNumber = 1, oppCountry, footed, opponentFooted }) {
+  function setTeams({ skin: nextSkin, entitled, myNumber = 1, oppCountry, footed, opponentFooted, hair, oppHair }) {
     if (nextSkin) {
       skin.shirt = nextSkin.shirt || skin.shirt;
       skin.shorts = nextSkin.shorts || skin.shorts;
@@ -746,6 +764,12 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
       skin.boots = nextSkin.boots || skin.boots;
     }
     if (myNumber) state.myNumber = myNumber;
+    if (hair && (hair.style !== look.myHair.style || hair.color !== look.myHair.color)) {
+      look.myHair = { style: hair.style, color: hair.color };
+    }
+    if (oppHair && (oppHair.style !== look.oppHair.style || oppHair.color !== look.oppHair.color)) {
+      look.oppHair = { style: oppHair.style, color: oppHair.color };
+    }
     if (oppCountry) {
       look.oppShirt = {
         design: 'solid',
@@ -776,8 +800,11 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
 
   function refreshKits() {
     const attackingIsMe = state.role === 'shoot';
+    /* 髪型・髪色（Build 4）: 蹴っているチームの髪にそろえる。変わっていなければ何もしない（軽い） */
+    const teamHair = attackingIsMe ? look.myHair : look.oppHair;
     kickers.forEach((player, index) => {
       const number = index + 1;
+      setHair(player, teamHair);
       if (attackingIsMe) {
         applySpecLook(player, myLook(number));
         setFooted(player, look.footed);
@@ -795,6 +822,8 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
         setFooted(player, look.oppFooted);
       }
     });
+    /* キーパーは相手チーム（自分が蹴るとき）／自分（自分が守るとき） */
+    setHair(keeper, attackingIsMe ? look.oppHair : look.myHair);
     if (attackingIsMe) {
       applySpecLook(keeper, {
         number: 1,
@@ -907,14 +936,19 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     refreshKits();
     const shooter = kickers[state.activeKicker];
     const kickFoot = role === 'shoot' ? look.footed : look.oppFooted;
-    /* 右利きはボールの左から、左利きは右から助走する（軸足が自然に残る向き） */
-    const side = kickFoot === 'left' ? 1 : -1;
-    shooter.position.set(side * SHOOT_START.x, 0, SHOOT_START.z);
-    shooter.rotation.set(0, Math.PI * (kickFoot === 'left' ? 0.05 : 0.95), 0);
+    applyRunUp(shooter, kickFoot);
     state.cameraBase = role === 'keep' ? CAMERAS.keep : CAMERAS.shoot;
     applyFov(role === 'keep' ? 'keep' : 'shoot');
     moveCamera({ pos: state.cameraBase.pos, look: state.cameraBase.look, duration: 420 });
     void footed;
+  }
+
+  /** 利き足ごとの助走の位置・向き（Build 4） */
+  function applyRunUp(shooter, foot) {
+    const run = runUpFor(foot);
+    shooter.position.set(run.startX, 0, run.startZ);
+    shooter.rotation.set(0, run.facing, 0);
+    return run;
   }
 
   function startConfetti(origin) {
@@ -1001,7 +1035,8 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
 
     if (role === 'shoot') {
       moveCamera({
-        pos: new THREE.Vector3(footSide * -0.85, 2.9, 8.0),
+        /* 助走するキッカーの側へ寄せて、踏み込みと振り抜きが画面に入るようにする（Build 4） */
+        pos: new THREE.Vector3(footSide * 0.75, 3.0, 8.3),
         look: new THREE.Vector3(shotPoint.x * 0.7, 1.35, GOAL_Z + 0.5),
         duration: 300 + 520,
       });
@@ -1076,16 +1111,15 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     const shooter = kickers[state.activeKicker];
 
     const footSide = (state.role === 'shoot' ? look.footed : look.oppFooted) === 'left' ? 1 : -1;
-    const startX = footSide * SHOOT_START.x;
-    const endX = footSide * SHOOT_BALL.x;
+    const run = runUpFor(state.role === 'shoot' ? look.footed : look.oppFooted);
     const pose = Math.min(1, elapsed / (flight.runUp + 260));
     poseKick(shooter, pose);
 
     if ((elapsed < flight.runUp || !flight.kicked) && shotApproach) {
       const p = Math.min(1, elapsed / flight.runUp);
-      shooter.position.z = lerp(SHOOT_START.z, SHOOT_BALL.z, easeOutCubic(p));
-      shooter.position.x = lerp(startX, endX, p);
-      shooter.rotation.y = Math.PI * (footSide === 1 ? 0.05 : 0.95);
+      shooter.position.z = lerp(run.startZ, run.plantZ, easeOutCubic(p));
+      shooter.position.x = lerp(run.startX, run.plantX, p);
+      shooter.rotation.y = run.facing;
     }
     if (!flight.kicked) {
       flight.kicked = true;
@@ -1366,6 +1400,27 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
         footed: look.footed,
         oppFooted: look.oppFooted,
         keeperFooted: state.keeperFooted,
+        /* Build 4: 利き足ごとの助走（開始位置・軸足位置・向き・蹴り足） */
+        runUp: (() => {
+          const run = runUpFor(state.role === 'shoot' ? look.footed : look.oppFooted);
+          const shooter = kickers[state.activeKicker];
+          return {
+            ...run,
+            ball: { ...BALL_SPOT },
+            shooter: shooter ? {
+              pos: shooter.position.toArray().map((value) => Number(value.toFixed(2))),
+              facing: Number(shooter.rotation.y.toFixed(3)),
+            } : null,
+            kickLeg: shooter ? shooter.userData.kickLeg : run.kickLeg,
+          };
+        })(),
+        /* Build 4: 国別の髪型・髪色と、手（✊ / ✋） */
+        hair: { ...look.myHair, styleName: look.myHair.style },
+        oppHair: { ...look.oppHair },
+        hands: {
+          kicker: kickers[0] ? { ...kickers[0].userData.hands } : null,
+          keeper: keeper ? { ...keeper.userData.hands } : null,
+        },
         busy: state.busy,
         ball: ball.position.toArray().map((v) => Number(v.toFixed(2))),
         camera: camera.position.toArray().map((v) => Number(v.toFixed(2))),

@@ -52,7 +52,7 @@ function characterBadge(character, entitled, t, language) {
   return { name, tag, badge };
 }
 
-export function lockerView({ t, entitled, draft, language, registered = false, order = 'first' }) {
+export function lockerView({ t, entitled, draft, language, registered = false, order = 'first', hair = null }) {
   const shirt = getShirt(draft.shirt);
   const shorts = getShorts(draft.shorts);
   const socks = getSocks(draft.socks);
@@ -87,6 +87,11 @@ export function lockerView({ t, entitled, draft, language, registered = false, o
         </div>
         <p class="locker__caption">${esc(shirt.name)} / ${esc(shorts.name)} / ${esc(socks.name)} / ${esc(boot.name)}</p>
       </section>
+
+      <!-- Build 4: 下までスクロールしなくても保存できるよう、プレビュー直下にも置く（下部のボタンも残す） -->
+      <button class="btn btn--gold btn--xl btn--block locker__save-top" data-action="save-skin" data-testid="save-skin-top">
+        ${icon('check')}<span>${esc(t('apply'))}</span>
+      </button>
 
       <section class="panel panel--order" data-testid="locker-order">
         <div class="row row--stack">

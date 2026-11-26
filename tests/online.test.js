@@ -332,7 +332,7 @@ test('ランキング: 行を混ぜて順位を付け、キャッシュする', 
   ];
   const merged = mergeRows(rows, [{ id: 'b', points: 310, updatedAt: 5 }, { id: 'c', points: 50, updatedAt: 3 }]);
   assert.equal(merged.length, 3);
-  assert.equal(merged.find((row) => row.id === 'b').points, 310);
+  assert.equal(merged.find((row) => row.id === 'b').total.points, 310, '新しい updatedAt の行を採用');
 
   const table = rankTable(merged, { id: 'me', nickname: 'ME', points: 200 });
   assert.equal(table[0].id, 'b');

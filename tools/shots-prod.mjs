@@ -1,5 +1,5 @@
 /**
- * SHOOTOUT 4 — 実ブラウザ E2E（Chromium / Playwright） Build 2
+ * SHOOTOUT 4 — 実ブラウザ E2E（Chromium / Playwright） Build 4
  *
  *   node tools/shots-prod.mjs          … 全チェック＋スクリーンショット
  *   node tools/shots-prod.mjs smoke    … 起動確認だけ
@@ -96,6 +96,12 @@ async function shot(page, name) {
 async function b3shot(page, name) {
   await page.screenshot({ path: resolve(OUT, `shootout4-b3-${name}.png`) });
   process.stdout.write(`    → downloads/shootout4-b3-${name}.png\n`);
+}
+
+/** Build 4 の代表スクショ（downloads/shootout4-b4-*.png） */
+async function b4shot(page, name) {
+  await page.screenshot({ path: resolve(OUT, `shootout4-b4-${name}.png`) });
+  process.stdout.write(`    → downloads/shootout4-b4-${name}.png\n`);
 }
 
 const state = (page) => page.evaluate(() => ({
@@ -954,6 +960,327 @@ async function main() {
     await sleep(200);
     check('J8 国えらぶの「あなたの国」「対戦相手」の横にスクロール案内（12言語対応）',
       hints.length === 2 && hints.every((hint) => hint.visible && hint.box > 40 && /←|→/.test(hint.text)) && hintEn !== '' && hintEn !== hints[0].text, { hints, hintEn });
+
+    /* ============================================================== *\
+     * K. Build 4（実機フィードバック＋ランキング刷新＋個人データ）
+     * ============================================================== */
+    await page.evaluate(() => { window.__SHOOTOUT_FORCE_CPU__ = null; window.__SHOOTOUT__.setPrefs({ size: 'standard', night: false, language: 'ja', order: 'first', sound: true, bgm: true, vibrate: true }); });
+    /* 髪型の検証を決定的にする（登録国を日本にそろえる） */
+    await page.evaluate(() => window.__SHOOTOUT__.register({ country: 'JP', foot: 'right' }));
+    await sleep(220);
+
+    /* K1 ロッカー上部の「保存して着る」 */
+    await page.evaluate(() => window.__SHOOTOUT__.go('locker'));
+    await sleep(450);
+    const lockerTop = await page.evaluate(() => {
+      const body = document.querySelector('.screen__body');
+      const button = document.querySelector('[data-testid="save-skin-top"]');
+      const rect = button?.getBoundingClientRect();
+      const bodyRect = body?.getBoundingClientRect();
+      return {
+        exists: Boolean(button),
+        visible: rect ? rect.height > 0 && rect.bottom <= bodyRect.bottom + 2 : false,
+        buttons: document.querySelectorAll('[data-action="save-skin"]').length,
+        aboveOrder: (rect?.top ?? 0) < (document.querySelector('[data-testid="locker-order"]')?.getBoundingClientRect().top ?? 0),
+        scrollTop: body?.scrollTop ?? -1,
+      };
+    });
+    await page.click('[data-testid="save-skin-top"]');
+    await sleep(260);
+    const lockerToast = await page.evaluate(() => document.querySelector('#toast')?.textContent ?? '');
+    check('K1 ロッカー上部（スクロール前）にも「保存して着る」があり、押すと保存できる',
+      lockerTop.exists && lockerTop.visible && lockerTop.buttons === 2 && lockerTop.aboveOrder
+      && /保存/.test(lockerToast), { lockerTop, lockerToast });
+    await b4shot(page, 'locker-top-save');
+
+    /* K2 蹴り始めは自分のボタンだけ（相手の方向・結果・スコア・PK表・バナーは着弾まで出ない） */
+    await page.evaluate(() => { window.__SHOOTOUT_FORCE_CPU__ = ['TL']; window.__SHOOTOUT__.startMatch(); window.__SHOOTOUT__.handover(); window.__SHOOTOUT__.hold(); });
+    await sleep(420);
+    await page.click('[data-testid="zone-BR"]'); /* 選ぶ（ここで音も起こす） */
+    const atKick = await page.evaluate(() => {
+      window.__SHOOTOUT__.confirmKick();
+      return {
+        cpuLit: document.querySelectorAll('.zone.is-cpu').length,
+        selected: [...document.querySelectorAll('.zone.is-selected')].map((el) => el.dataset.dir),
+        status: document.querySelector('#kick-status')?.textContent ?? '',
+        score: document.querySelector('[data-testid="score-me"]')?.textContent ?? '',
+        cells: document.querySelectorAll('[data-testid="pk-me"] .pkcell.is-goal, [data-testid="pk-me"] .pkcell.is-miss').length,
+        bannerHidden: document.querySelector('#banner')?.hidden !== false,
+        history: window.__SHOOTOUT__.match?.history ?? 0,
+        ball: window.__SHOOTOUT__.stadium().ball,
+      };
+    });
+    check('K2 蹴り始めに相手の方向・結果テキスト・スコア・PK表・バナーが出ない（自分の選択だけ点灯）',
+      atKick.history >= 1 && atKick.cpuLit === 0 && atKick.status === '' && atKick.score === '0'
+      && atKick.cells === 0 && atKick.bannerHidden === true
+      && atKick.selected.length === 1 && atKick.selected[0] === 'BR', atKick);
+    await b4shot(page, 'kick-start');
+
+    /* 着弾でまとめて出る */
+    await page.waitForFunction(() => document.querySelector('#banner')?.hidden === false, null, { timeout: 6000 });
+    const afterImpact = await page.evaluate(() => ({
+      status: document.querySelector('#kick-status')?.textContent ?? '',
+      score: document.querySelector('[data-testid="score-me"]')?.textContent ?? '',
+      cells: document.querySelectorAll('[data-testid="pk-me"] .pkcell.is-goal').length,
+      banner: document.querySelector('#banner')?.textContent ?? '',
+      cpuLit: document.querySelectorAll('.zone.is-cpu').length,
+      goal: window.__SHOOTOUT__.match?.lastEvent?.goal,
+      audio: window.__SHOOTOUT__.audio,
+    }));
+    check('K3 ボールが届いた瞬間に相手の方向・結果テキスト・スコア・PK表・バナーが出る',
+      afterImpact.goal === true && afterImpact.score === '1' && afterImpact.cells === 1
+      && /あなた: 右下/.test(afterImpact.status) && /相手: 左上/.test(afterImpact.status)
+      && /ゴール/.test(afterImpact.banner), afterImpact);
+    check('K4 ゴールの瞬間に「ゴール！」のボイスが鳴る',
+      (afterImpact.audio.voices.goal ?? 0) >= 1 && afterImpact.audio.voice?.kind === 'goal', afterImpact.audio);
+    await b4shot(page, 'impact');
+
+    /* セーブ（同じ方向を選ぶ）でも、蹴り始めは相手のボタンを光らせない */
+    await page.evaluate(() => { window.__SHOOTOUT_FORCE_CPU__ = ['TL']; window.__SHOOTOUT__.startMatch(); window.__SHOOTOUT__.handover(); window.__SHOOTOUT__.hold(); });
+    await sleep(380);
+    await page.click('[data-testid="zone-TL"]');
+    const saveAtKick = await page.evaluate(() => {
+      const voices = window.__SHOOTOUT__.audio.voices;
+      window.__SHOOTOUT__.confirmKick();
+      return { cpuLit: document.querySelectorAll('.zone.is-cpu').length, voices };
+    });
+    await page.waitForFunction(() => document.querySelector('#banner')?.hidden === false, null, { timeout: 6000 });
+    const saveDone = await page.evaluate(() => ({
+      status: document.querySelector('#kick-status')?.textContent ?? '',
+      banner: document.querySelector('#banner')?.textContent ?? '',
+      cpuLit: document.querySelectorAll('.zone.is-cpu').length,
+      audio: window.__SHOOTOUT__.audio,
+    }));
+    check('K5 セーブでも相手の方向は着弾まで出さず、声は「セーブ！」',
+      saveAtKick.cpuLit === 0 && saveDone.cpuLit === 1 && /セーブ/.test(saveDone.banner)
+      && (saveDone.audio.voices.save ?? 0) >= 1 && saveDone.audio.voice?.kind === 'save', { saveAtKick, saveDone });
+
+    /* K6 利き足の蹴り分け（右＝左から右足 / 左＝右から左足） */
+    const runUpFor = async (foot) => {
+      await page.evaluate((value) => {
+        window.__SHOOTOUT__.register({ foot: value });
+        window.__SHOOTOUT_FORCE_CPU__ = ['TL'];
+        window.__SHOOTOUT__.startMatch();
+        window.__SHOOTOUT__.handover();
+        window.__SHOOTOUT__.hold();
+      }, foot);
+      await sleep(520);
+      return page.evaluate(() => window.__SHOOTOUT__.stadium().runUp);
+    };
+    const leftRun = await runUpFor('left');
+    const rightRun = await runUpFor('right');
+    check('K6 右利きはボールの左から右足、左利きは右から左足（助走位置・角度・蹴り足）',
+      leftRun && rightRun
+      && leftRun.startX > 0 && leftRun.plantX > 0 && Math.abs(leftRun.facing - Math.PI * 1.07) < 0.001 && leftRun.kickLeg === 0
+      && rightRun.startX < 0 && rightRun.plantX < 0 && Math.abs(rightRun.facing - Math.PI * 0.93) < 0.001 && rightRun.kickLeg === 1
+      && Math.abs(leftRun.shooter.pos[0] - leftRun.startX) < 0.02
+      && Math.abs(rightRun.shooter.pos[0] - rightRun.startX) < 0.02, { leftRun, rightRun });
+    await b4shot(page, 'runup-right');
+
+    /* K7 バックグラウンド復帰で音が戻る */
+    await page.evaluate(() => window.__SHOOTOUT__.setPrefs({ sound: true, bgm: true }));
+    await page.evaluate(() => window.__SHOOTOUT__.appHidden(false));
+    await sleep(400);
+    const beforeHide4 = await page.evaluate(() => window.__SHOOTOUT__.audio);
+    await page.evaluate(() => window.__SHOOTOUT__.appHidden(true));
+    await sleep(600);
+    const hidden4 = await page.evaluate(() => window.__SHOOTOUT__.audio);
+    await page.evaluate(() => window.__SHOOTOUT__.appHidden(false));
+    await sleep(700);
+    const shown4 = await page.evaluate(() => window.__SHOOTOUT__.audio);
+    const gesture = await page.evaluate(() => window.__SHOOTOUT__.ensureAudio());
+    check('K7 バックグラウンド復帰で音が戻る（Audio Session→resume→無音<audio>→BGM、タップでも resume）',
+      beforeHide4.crowd === true && hidden4.crowd === false && hidden4.music === false
+      && shown4.crowd === true && shown4.music === true && shown4.silent === true
+      && shown4.recoveries > hidden4.recoveries && gesture === true, { beforeHide4, hidden4, shown4, gesture });
+
+    /* K8 遊び方の下部: IPKSF 正式名称・加盟案内・公式勝ち点ルール */
+    await page.evaluate(() => window.__SHOOTOUT__.go('rules'));
+    await sleep(400);
+    const rules4 = await page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="rules-ipksf"]');
+      const points = document.querySelector('[data-testid="rules-points"]');
+      const bullet = document.querySelector('.bulletlist');
+      const body = document.querySelector('.screen__body');
+      body.scrollTop = body.scrollHeight;
+      const rect = panel?.getBoundingClientRect();
+      const bodyRect = body?.getBoundingClientRect();
+      return {
+        name: document.querySelector('[data-testid="rules-ipksf-name"]')?.textContent ?? '',
+        full: document.querySelector('[data-testid="rules-ipksf-full"]')?.textContent ?? '',
+        join: document.querySelector('[data-testid="rules-join"]')?.textContent ?? '',
+        pointsText: points?.innerText ?? '',
+        afterBullets: Boolean(panel && bullet && panel.compareDocumentPosition(bullet) & Node.DOCUMENT_POSITION_PRECEDING),
+        clipped: rect ? rect.bottom > bodyRect.bottom + 2 : true,
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    });
+    check('K8 遊び方の下部に IPKSF 正式名称・加盟案内・公式勝ち点ルール（見切れなし）',
+      /INTERNATIONAL PENALTY KICK SHOOTOUT FEDERATION/.test(rules4.name)
+      && /国際PK戦連盟/.test(rules4.full) && rules4.join.length > 2
+      && /\+3pt/.test(rules4.pointsText) && /\+2pt/.test(rules4.pointsText) && /\+1pt/.test(rules4.pointsText)
+      && rules4.afterBullets && rules4.clipped === false && rules4.overflow <= 0, rules4);
+    await b4shot(page, 'rules-ipksf');
+
+    /* K9 国別の髪型・髪色と、手（✊ / ✋） */
+    await page.evaluate(() => {
+      window.__SHOOTOUT__.setPrefs({ country: 'JP', opponent: 'BR' });
+      window.__SHOOTOUT_FORCE_CPU__ = ['TL'];
+      window.__SHOOTOUT__.startMatch();
+      window.__SHOOTOUT__.handover();
+      window.__SHOOTOUT__.hold();
+    });
+    await sleep(600);
+    const look4 = await page.evaluate(() => ({
+      stadium: window.__SHOOTOUT__.stadium(),
+      style: window.__SHOOTOUT__.entitled,
+    }));
+    check('K9 3Dの両チームに手（こぶし＝フィールド / 指付きグローブ＝キーパー）と国別の髪',
+      look4.stadium.hands.kicker?.kind === 'fist' && look4.stadium.hands.kicker?.count === 2
+      && look4.stadium.hands.keeper?.kind === 'glove' && look4.stadium.hands.keeper?.count === 2
+      && look4.stadium.hair.style === 'short' && look4.stadium.oppHair.style === 'topknot', look4);
+    /* PRO の髪型は国籍で変わる（ロッカーのプレビューにも出る） */
+    await page.evaluate(() => { window.__SHOOTOUT__.setPrefs({ opponent: 'SE' }); window.__SHOOTOUT__.go('locker'); });
+    await sleep(420);
+    await page.click('[data-character="stylized"]');
+    await sleep(320);
+    const preview4 = await page.evaluate(() => window.__SHOOTOUT__.preview);
+    await page.click('[data-testid="save-skin-top"]');
+    await sleep(260);
+    await page.evaluate(() => { window.__SHOOTOUT_FORCE_CPU__ = ['TL']; window.__SHOOTOUT__.startMatch(); window.__SHOOTOUT__.handover(); window.__SHOOTOUT__.hold(); });
+    await sleep(700);
+    const stylized4 = await page.evaluate(() => window.__SHOOTOUT__.stadium());
+    check('K9b PRO のスタイリッシュ型は国別の髪（JP=ショート / SE=アッシュ）で、3Dとロッカーの両方に反映',
+      preview4.hair?.style === 'short' && preview4.hands?.kind === 'fist'
+      && stylized4.style === 'stylized' && stylized4.hair.style === 'short' && stylized4.oppHair.style === 'short'
+      && stylized4.hair.color === '#15100c' && stylized4.oppHair.color === '#8d877f', { preview4, stylized4 });
+    await b4shot(page, 'hair-stylized');
+
+    /* K10 ランキング: シーズン表記・あなたの順位・4タブ・世界/国内・順位表 */
+    await page.evaluate(() => {
+      const pad = (value) => String(value).padStart(2, '0');
+      const now = new Date();
+      const month = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+      const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+      const week = `${monday.getFullYear()}-${pad(monday.getMonth() + 1)}-${pad(monday.getDate())}`;
+      const tally = { points: 7, wins: 3, losses: 1, goals: 12, conceded: 8, played: 4 };
+      localStorage.setItem('shootout4.standing.v1', JSON.stringify({
+        total: tally,
+        month: { key: month, ...tally },
+        week: { key: week, ...tally },
+      }));
+      localStorage.setItem('shootout4.shots.v1', JSON.stringify({ TL: 3, TR: 1, BL: 0, BR: 6 }));
+    });
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => window.__SHOOTOUT_READY__ === true, null, { timeout: 20000 });
+    await page.evaluate(() => { window.__SHOOTOUT__.skipOpening(); window.__SHOOTOUT__.setPrefs({ language: 'ja', size: 'standard', order: 'first' }); window.__SHOOTOUT__.go('rank'); });
+    await sleep(600);
+    const rank4 = await page.evaluate(() => ({
+      season: document.querySelector('[data-testid="rank-season-label"]')?.textContent ?? '',
+      you: document.querySelector('[data-testid="rank-you"]')?.textContent ?? '',
+      diff: document.querySelector('[data-testid="rank-diff"]')?.textContent ?? '',
+      tabs: document.querySelectorAll('[data-rank-tab]').length,
+      scopes: document.querySelectorAll('[data-scope]').length,
+      rows: document.querySelectorAll('.ranktable__row').length,
+      meRow: document.querySelector('[data-testid="rank-row-me"]')?.innerText?.replace(/\s+/g, ' ').trim() ?? '',
+      rules: document.querySelector('[data-testid="rank-rules"]')?.innerText ?? '',
+      sorted: window.__SHOOTOUT__.rank('total').map((row) => [row.place, row.tally.points, row.tally.goals, row.tally.conceded]),
+    }));
+    check('K10 ランキング: シーズン表記・あなたの順位（勝ち点/勝敗/勝率）・4タブ・世界/国内',
+      /通算シーズン · 全期間/.test(rank4.season)
+      && /あなたの順位：\d+位/.test(rank4.you) && /7pt/.test(rank4.you) && /3勝1敗/.test(rank4.you) && /75%/.test(rank4.you)
+      && rank4.tabs === 4 && rank4.scopes === 2 && rank4.rows >= 1 && /🥇/.test(rank4.meRow)
+      && /3pt/.test(rank4.rules) && /得失点差/.test(rank4.rules), rank4);
+    await b4shot(page, 'rank');
+
+    /* タブを切り替えると期間の集計に変わる（月間＝今月、勝率＝通算） */
+    await page.click('[data-rank-tab="week"]');
+    await sleep(260);
+    const weekTab = await page.evaluate(() => ({
+      label: document.querySelector('[data-testid="rank-season-label"]')?.textContent ?? '',
+      on: document.querySelector('[data-rank-tab="week"]')?.classList.contains('is-on'),
+      you: document.querySelector('[data-testid="rank-you"]')?.textContent ?? '',
+    }));
+    await page.click('[data-rank-tab="month"]');
+    await sleep(240);
+    const monthTab = await page.evaluate(() => ({
+      label: document.querySelector('[data-testid="rank-season-label"]')?.textContent ?? '',
+      you: document.querySelector('[data-testid="rank-you"]')?.textContent ?? '',
+    }));
+    await page.click('[data-rank-tab="rate"]');
+    await sleep(240);
+    const rateTab = await page.evaluate(() => ({
+      label: document.querySelector('[data-testid="rank-season-label"]')?.textContent ?? '',
+      you: document.querySelector('[data-testid="rank-you"]')?.textContent ?? '',
+    }));
+    check('K11 総合/月間/週間/勝率でシーズン表記と集計が切り替わる',
+      /週シーズン/.test(weekTab.label) && weekTab.on === true
+      && /シーズン · 残り/.test(monthTab.label) && /7pt/.test(monthTab.you)
+      && /通算勝率/.test(rateTab.label) && /75%/.test(rateTab.you), { weekTab, monthTab, rateTab });
+    await page.evaluate(() => window.__SHOOTOUT__.setRankTab('total'));
+    await sleep(200);
+
+    /* K12 戦績のキック傾向（4択の回数と％） */
+    await page.evaluate(() => window.__SHOOTOUT__.go('stats'));
+    await sleep(400);
+    const tendency = await page.evaluate(() => ({
+      rows: ['TL', 'TR', 'BL', 'BR'].map((dir) => {
+        const row = document.querySelector(`[data-testid="tendency-${dir}"]`);
+        return { dir, count: row?.dataset.count, rate: row?.dataset.rate, text: row?.innerText?.replace(/\s+/g, ' ').trim() ?? '' };
+      }),
+      total: document.querySelector('[data-testid="tendency-total"]')?.textContent ?? '',
+      panel: Boolean(document.querySelector('[data-testid="stats-tendency"]')),
+      shots: window.__SHOOTOUT__.shots,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      body: document.querySelector('.screen__body') ? true : false,
+    }));
+    check('K12 戦績にキック傾向（左上3/右上1/左下0/右下6・合計10本と％）',
+      tendency.panel && tendency.rows[0].count === '3' && tendency.rows[0].rate === '30'
+      && tendency.rows[1].count === '1' && tendency.rows[2].count === '0'
+      && tendency.rows[3].count === '6' && tendency.rows[3].rate === '60'
+      && /10本/.test(tendency.total) && tendency.overflow <= 0, tendency);
+    await b4shot(page, 'stats-tendency');
+
+    /* 文字特大でもランキング・戦績・遊び方が横にはみ出さない */
+    await page.evaluate(() => window.__SHOOTOUT__.setPrefs({ size: 'extra' }));
+    const sweepB4 = await sweepScreens(page, 'build4', ['rank', 'stats', 'rules', 'locker']);
+    check('K13 文字特大でもランキング・戦績・遊び方・ロッカーがはみ出さない', sweepB4.problems.length === 0, sweepB4.problems);
+    await page.evaluate(() => window.__SHOOTOUT__.setPrefs({ size: 'standard' }));
+
+    /* K14 結果画面の「結果をシェア」（Web Share が無い環境＝クリップボード） */
+    await page.evaluate(() => {
+      window.__SHOOTOUT__.setPrefs({ opponent: 'BR' });
+      window.__SHOOTOUT_FORCE_CPU__ = ['TL'];
+      window.__SHOOTOUT__.startMatch();
+      window.__SHOOTOUT__.handover();
+    });
+    await sleep(400);
+    const shareEnd = await playToEnd(page, { max: 30 });
+    await page.waitForFunction(() => window.__SHOOTOUT__.screen === 'result', null, { timeout: 12000 });
+    await sleep(320);
+    const shareInfo = await page.evaluate(() => ({
+      button: document.querySelector('[data-testid="share-result"]')?.textContent?.trim() ?? '',
+      text: window.__SHOOTOUT__.shareText(),
+      winner: window.__SHOOTOUT__.match?.winner ?? shareEnd?.winner,
+    }));
+    check('K14 結果画面に「結果をシェア」（国旗・スコア・#SHOOTOUT4・IPKSF）',
+      shareInfo.button.length > 0 && /🇯🇵/.test(shareInfo.text) && /🇧🇷/.test(shareInfo.text)
+      && /\d+-\d+/.test(shareInfo.text) && /#SHOOTOUT4/.test(shareInfo.text) && /IPKSF/.test(shareInfo.text), shareInfo);
+    await page.evaluate(() => {
+      try { Object.defineProperty(navigator, 'share', { value: undefined, configurable: true }); } catch { /* そのまま */ }
+      try {
+        const fake = { writeText: async (value) => { window.__COPIED__ = value; } };
+        Object.defineProperty(navigator, 'clipboard', { value: fake, configurable: true });
+      } catch { /* そのまま */ }
+      window.__COPIED__ = '';
+    });
+    await page.click('[data-testid="share-result"]');
+    await sleep(320);
+    const shared = await page.evaluate(() => ({ copied: window.__COPIED__, toast: document.querySelector('#toast')?.textContent ?? '' }));
+    check('K14b 共有できない環境ではクリップボードへコピーして「コピーしました」',
+      /#SHOOTOUT4/.test(shared.copied) && shared.copied === shareInfo.text && /コピーしました/.test(shared.toast), shared);
+    await b4shot(page, 'result-share');
 
     /* ============================================================== *\
      * I. コンソールエラー 0

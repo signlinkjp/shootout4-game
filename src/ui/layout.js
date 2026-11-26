@@ -40,6 +40,7 @@ const ICONS = {
   foot: '<path d="M9 3.5h3.2c.5 3 .7 5.6.7 8 0 2.2-.3 3.9-.9 5.2h-3c.6-1.6.9-3.4.9-5.4 0-2.4-.4-5-.9-7.8zM5 19.5h12c1.4 0 2.2-.6 2.2-1.7 0-.9-.6-1.5-1.6-1.6l-3.6-.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>',
   soundwave: '<path d="M4 10v4h3l4 3.5v-11L7 10z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15 8.6a5 5 0 0 1 0 6.8M17.8 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
   soundOff: '<path d="M4 9.5h3.5L12 5.5v13L7.5 14.5H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15.5 9.5l4.5 5M20 9.5l-4.5 5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
+  share: '<circle cx="18" cy="5.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="6" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="18.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.2 10.8l7.6-4M8.2 13.2l7.6 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
 };
 
 export function icon(name, className = '') {
@@ -52,6 +53,13 @@ export function icon(name, className = '') {
 export function flag(code, className = 'flag') {
   const country = getCountry(code);
   return `<img class="${className}" src="${country.flag}" alt="" width="48" height="32" draggable="false">`;
+}
+
+/** 国旗の絵文字（ISO 2文字 → 地域表示記号。シェア文面用） */
+export function flagEmoji(code) {
+  const value = String(code || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2);
+  if (value.length !== 2) return '🏳️';
+  return String.fromCodePoint(...[...value].map((character) => 0x1f1e6 + character.charCodeAt(0) - 65));
 }
 
 export function teamLabel(code, language, extra = '') {

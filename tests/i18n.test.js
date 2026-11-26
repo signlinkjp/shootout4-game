@@ -74,7 +74,9 @@ test('辞書の文字列に { } の入れ忘れが無い', () => {
   for (const language of LANGUAGES) {
     for (const [key, value] of Object.entries(DICT[language])) {
       assert.equal(typeof value, 'string', `${language}.${key}`);
-      assert.equal(value.includes('{'), false, `${language}.${key} にプレースホルダ`);
+      /* 差し込み（{name}）は書式どおり。閉じ忘れ・全角などは許さない */
+      const rest = String(value).replace(/\{\w+\}/g, '');
+      assert.equal(rest.includes('{') || rest.includes('}'), false, `${language}.${key} に不正な { }`);
       assert.equal(value.includes('undefined'), false, `${language}.${key}`);
     }
   }

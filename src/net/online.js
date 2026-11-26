@@ -18,9 +18,14 @@
 
 import { CONFIG } from '../config.js';
 import { DIRECTIONS, MISS, isPick, payloadTooLarge, validateOnlineKick, validateStamp, MAX_TOTAL_KICKS } from '../core/rules.js';
+import {
+  fromWire, toWire, normalizeRow, rankTable,
+} from '../core/ranking.js';
 import { RealtimeClient, realtimeUrl, presenceMembers } from './realtime.js';
 
 export { RealtimeClient, realtimeUrl, presenceMembers };
+/* ランキングの並べ方が1か所になるよう、計算は core/ranking.js に置く（画面とテストはここから読める） */
+export { rankTable };
 
 const injected = () => {
   if (typeof window === 'undefined') return null;
@@ -583,14 +588,22 @@ export class ShootoutSession {
 export const RANK_CACHE_KEY = 'shootout4.peers.v1';
 export const RANK_FRESH_MS = 10 * 60 * 1000;
 
+/**
+ * 自分と相手の行を混ぜる（Build 4: 行は勝ち点の集計を持つ）。
+ * 同じ id は updatedAt が新しいほうを採用する。
+ */
 export function mergeRows(local = [], peers = []) {
   const byId = new Map();
-  for (const row of local) if (row && row.id) byId.set(row.id, row);
+  for (const row of local) {
+    const normal = normalizeRow(row);
+    if (normal) byId.set(normal.id, normal);
+  }
   for (const row of peers) {
-    if (!row || !row.id) continue;
-    const existing = byId.get(row.id);
-    if (!existing) byId.set(row.id, row);
-    else if (row.updatedAt && existing.updatedAt && row.updatedAt > existing.updatedAt) byId.set(row.id, row);
+    const normal = normalizeRow(row);
+    if (!normal) continue;
+    const existing = byId.get(normal.id);
+    if (!existing) byId.set(normal.id, normal);
+    else if (normal.updatedAt > existing.updatedAt) byId.set(normal.id, normal);
   }
   return [...byId.values()];
 }
@@ -603,7 +616,7 @@ export function readRankCache(backend, { now = Date.now(), freshMs = RANK_FRESH_
     const saved = JSON.parse(raw);
     if (!saved || !Array.isArray(saved.rows)) return [];
     if (now - Number(saved.savedAt || 0) > freshMs) return [];
-    return saved.rows.filter((row) => row && typeof row.id === 'string');
+    return saved.rows.map((row) => normalizeRow(row)).filter(Boolean);
   } catch {
     return [];
   }
@@ -644,17 +657,15 @@ export class RankingNet {
       onBroadcast: (event, payload) => {
         if (event !== 'row' || !payload || !payload.row) return;
         if (payloadTooLarge(payload)) return;
-        const incoming = payload.row;
-        if (typeof incoming.id !== 'string' || incoming.id.length > 40) return;
-        this.peers.set(incoming.id, {
-          ...incoming,
-          nickname: String(incoming.nickname || 'PLAYER').slice(0, 16),
-          countryCode: String(incoming.countryCode || 'JP').toUpperCase().slice(0, 2),
-          points: Math.max(0, Math.round(Number(incoming.points) || 0)),
-          wins: Math.max(0, Math.round(Number(incoming.wins) || 0)),
-          losses: Math.max(0, Math.round(Number(incoming.losses) || 0)),
-          updatedAt: Number(incoming.updatedAt) || this.now(),
-        });
+        const incoming = fromWire(payload.row, { now: this.now() });
+        if (!incoming) return;
+        this.peers.set(incoming.id, incoming);
+      },
+      onPresence: ({ members }) => {
+        /* 在席の相手には自分の行を配る（2.5秒ごとのタイマーを待たずに届く） */
+        if (!row || !Array.isArray(members)) return;
+        const mine = this.client.clientId;
+        if (members.some((member) => member && member.key && member.key !== mine)) this.publish(row);
       },
     });
     if (row) this.publish(row);
@@ -667,9 +678,12 @@ export class RankingNet {
     return this.channel;
   }
 
+  /** 自分の行を配る（小さい配列の形。512文字の上限に収まる） */
   publish(row) {
     if (!this.channel || !row) return false;
-    return this.client.broadcast(this.channel, 'row', { row });
+    const wire = toWire(row);
+    if (!wire) return false;
+    return this.client.broadcast(this.channel, 'row', { row: wire });
   }
 
   close() {
@@ -681,11 +695,3 @@ export class RankingNet {
   }
 }
 
-/** 表示用の順位（自分を含めてポイント順） */
-export function rankTable(rows, me) {
-  const all = [...rows];
-  if (me && !all.some((row) => row.id === me.id)) all.push(me);
-  return all
-    .sort((a, b) => (b.points || 0) - (a.points || 0) || (b.wins || 0) - (a.wins || 0))
-    .map((row, index) => ({ ...row, place: index + 1, isMe: Boolean(me && row.id === me.id) }));
-}

@@ -37,7 +37,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     /// アプリ側の AVAudioSession を playback で起こし直す。
     /// 電話・Siri・バックグラウンドから戻ると、セッションが止まっていることがある。
+    /// Build 4: 一度で有効にならないことがあるので、少し後にもう一度試す。
     static func activateAudioSession() {
+        activateAudioSessionOnce()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            AppDelegate.activateAudioSessionOnce()
+        }
+    }
+
+    private static func activateAudioSessionOnce() {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
@@ -70,11 +78,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state.
+        // Build 4: 前面に戻る直前から Audio Session を起こし始める
+        AppDelegate.activateAudioSession()
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Build 3: 戻ってきたら Audio Session を起こし直す（音が戻らない問題の対策）
+        // Build 4: 戻ってきたら Audio Session を起こし直す（音が戻らない問題の対策）
         AppDelegate.activateAudioSession()
     }
 

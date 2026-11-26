@@ -24,7 +24,7 @@ const CAMERA = {
   fov: 36,
 };
 
-export function createPreview(canvas, { style = 'voxel', kit = null, number = 1, animate = false } = {}) {
+export function createPreview(canvas, { style = 'voxel', kit = null, number = 1, animate = false, hair = null } = {}) {
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -79,7 +79,7 @@ export function createPreview(canvas, { style = 'voxel', kit = null, number = 1,
       disposeCharacter(character);
       disposeCharacterTextures();
     }
-    character = buildCharacter({ style: next, tone: 0 });
+    character = buildCharacter({ style: next, tone: 0, hair });
     const shirt = nextKit ? shirtSpec(nextKit.shirt) : shirtSpec('chalk-home');
     const shorts = nextKit ? shortsSpec(nextKit.shorts) : shortsSpec('navy-shorts');
     const socks = nextKit ? socksSpec(nextKit.socks) : socksSpec('white-socks');
@@ -165,6 +165,8 @@ export function createPreview(canvas, { style = 'voxel', kit = null, number = 1,
         character: state.style,
         spinning: Boolean(state.spinStart),
         yaw: character ? Number(character.rotation.y.toFixed(3)) : 0,
+        hair: character && character.userData.hair ? { ...character.userData.hair } : null,
+        hands: character ? { ...character.userData.hands } : null,
       };
     },
     dispose() {

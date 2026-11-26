@@ -23,6 +23,10 @@ const state = {
   country: null,
   unlocked: false,
   backgrounded: false,
+  silent: null,
+  voices: {},
+  lastVoice: null,
+  recoveries: 0,
 };
 
 const AC = () => (typeof window === 'undefined' ? null : window.AudioContext || window.webkitAudioContext);
@@ -275,6 +279,126 @@ export function purchaseChime(ok = true) {
 }
 
 /* ------------------------------------------------------------------ *\
+ * ボイス（ゴール！ / セーブ！ / ミス！）— Build 4
+ *
+ * 着弾の瞬間に、判定を言葉で叫ぶ。iOS の WKWebView でも確実に鳴るよう、
+ * 音源ファイルにも SpeechSynthesis の声質差にも頼らず、WebAudio の
+ * フォルマント合成（のこぎり波 + 2つのバンドパス）で作る。
+ * 母音は表示中の言語の単語から拾うので、12言語それぞれの響きになる。
+ * 既存の効果音・歓声の後ろに 0.16 秒遅らせて重ねる（音が割れない）。
+ * 設定（prefs.sound）が OFF のときは鳴らさない。
+ * ------------------------------------------------------------------ */
+
+/** 母音のフォルマント（F1, F2）。声の「あいうえお」を作る2つの共鳴周波数。 */
+const VOWEL_FORMANTS = {
+  a: [800, 1180],
+  o: [470, 820],
+  u: [330, 700],
+  e: [520, 1780],
+  i: [300, 2250],
+  n: [260, 1100],
+};
+
+/* カタカナ → 母音（日本語の単語から母音を取るため） */
+const KANA_ROWS = [
+  ['アカサタナハマヤラワガザダバパァャヮ', 'a'],
+  ['イキシチニヒミリギジヂビピィ', 'i'],
+  ['ウクスツヌフムユルグズヅブプゥュヴ', 'u'],
+  ['エケセテネヘメレゲゼデベペェ', 'e'],
+  ['オコソトノホモヨロヲゴゾドボポォョ', 'o'],
+];
+const KANA_VOWEL = new Map();
+for (const [characters, vowel] of KANA_ROWS) {
+  for (const character of characters) KANA_VOWEL.set(character, vowel);
+}
+
+/** 言葉から母音を最大3つ拾う（取れなければ判定ごとの既定） */
+function vowelPattern(text, fallback) {  const vowels = [];
+  for (const character of String(text || '')) {
+    if (/[aeiou]/i.test(character)) vowels.push(character.toLowerCase());
+    else if (KANA_VOWEL.has(character)) vowels.push(KANA_VOWEL.get(character));
+    else if (character === 'ー') vowels.push(vowels[vowels.length - 1] || 'o');
+    if (vowels.length >= 3) break;
+  }
+  if (!vowels.length) return [...fallback];
+  while (vowels.length < 2) vowels.push(vowels[vowels.length - 1]);
+  return vowels;
+}
+
+/* 判定ごとの叫び方（高さ・長さ・音程の動き） */
+const VOICE_CONTOUR = {
+  goal: { from: 168, to: 286, gain: 0.085, durs: [0.15, 0.15, 0.36], fallback: ['o', 'o', 'u'] },
+  save: { from: 208, to: 156, gain: 0.075, durs: [0.13, 0.3], fallback: ['e', 'u'] },
+  miss: { from: 232, to: 138, gain: 0.07, durs: [0.14, 0.4], fallback: ['i', 'u'] },
+};
+
+/** 1音節ぶんの声（フォルマント2つ） */
+function syllable({ vowel, at, dur, gain, from, to }) {
+  const ctx = state.ctx;
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(from, at);
+  osc.frequency.linearRampToValueAtTime(Math.max(60, to), at + dur);
+  const [f1, f2] = VOWEL_FORMANTS[vowel] || VOWEL_FORMANTS.o;
+  const band1 = ctx.createBiquadFilter();
+  band1.type = 'bandpass';
+  band1.frequency.value = f1;
+  band1.Q.value = 5;
+  const band2 = ctx.createBiquadFilter();
+  band2.type = 'bandpass';
+  band2.frequency.value = f2;
+  band2.Q.value = 7;
+  const amp = ctx.createGain();
+  amp.gain.setValueAtTime(0.0001, at);
+  amp.gain.linearRampToValueAtTime(gain, at + Math.min(0.035, dur * 0.35));
+  amp.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  const mix = ctx.createGain();
+  mix.gain.value = 0.9;
+  osc.connect(band1).connect(mix);
+  osc.connect(band2).connect(mix);
+  mix.connect(amp).connect(state.sfxBus);
+  osc.start(at);
+  osc.stop(at + dur + 0.02);
+  /* 子音の立ち上がり（言葉として聞き取りやすくする） */
+  noise({ dur: 0.028, gain: gain * 0.55, low: 500, high: 2600, delay: Math.max(0, at - ctx.currentTime) });
+}
+
+/** テスト用: 言葉から拾う母音（12言語の単語が声になるか） */
+export function voiceVowels(text, fallback = ['o', 'o', 'u']) {
+  return vowelPattern(text, fallback);
+}
+
+/**
+ * 判定のボイス。kind = 'goal' | 'save' | 'miss'、text は表示中の言語の単語。
+ * 鳴らしたら { kind, vowels } を返す（鳴らせなければ null）。
+ */
+export function voice(kind, { text = '', language = '' } = {}) {
+  if (!state.settings.sound) return null;
+  const contour = VOICE_CONTOUR[kind];
+  if (!contour || !state.ctx) return null;
+  const vowels = vowelPattern(text, contour.fallback);
+  const start = state.ctx.currentTime + 0.16;
+  let cursor = start;
+  vowels.forEach((vowel, index) => {
+    const dur = contour.durs[Math.min(index, contour.durs.length - 1)];
+    const span = (contour.to - contour.from) / Math.max(1, vowels.length);
+    syllable({
+      vowel,
+      at: cursor,
+      dur,
+      gain: contour.gain * (index === vowels.length - 1 ? 1 : 0.86),
+      from: contour.from + span * index,
+      to: contour.from + span * (index + 1),
+    });
+    cursor += dur * 0.92;
+  });
+  state.voices[kind] = (state.voices[kind] || 0) + 1;
+  state.lastVoice = { kind, vowels: vowels.join(''), language: String(language || ''), at: Date.now() };
+  return { kind, vowels };
+}
+
+/* ------------------------------------------------------------------ *\
  * 国別の歓声（試合中ずっと薄く流す）
  * ------------------------------------------------------------------ */
 
@@ -434,6 +558,81 @@ export function testSound() {
  *   · AudioContext を suspend（音声セッションを握り続けない）
  * 戻ってきたら resumeFromBackground() で再開する。
  */
+/* ------------------------------------------------------------------ *\
+ * バックグラウンドから戻ったとき（Build 4で補強）
+ *
+ * iPhone でホームに戻ったり、他のアプリへ移ってから戻ると音が出なくなる
+ * （WKWebView の AudioContext も、下支えの無音 <audio> も止まるため）。
+ * 戻ったら次の順で確実に起こし直す:
+ *   1. アプリ側の AVAudioSession を再アクティブ化（Capacitor ブリッジ activate）
+ *   2. AudioContext.resume()（返らない環境があるので、少し後にもう一度）
+ *   3. 無音 <audio> を（消えていれば作り直して）再再生
+ *   4. BGM・歓声を再開
+ * どの段が失敗してもゲームは止めない。
+ * ------------------------------------------------------------------ */
+
+/** 無音の下支え <audio> を（必要なら作り直して）鳴らす */
+function ensureSilentAudio() {
+  if (!state.unlocked) return null;
+  if (!state.silent) {
+    try {
+      const audio = new Audio(SILENT_WAV);
+      audio.loop = true;
+      audio.volume = 0.001;
+      state.silent = audio;
+    } catch {
+      return null;
+    }
+  }
+  try {
+    state.silent.play?.()?.catch?.(() => {});
+  } catch {
+    /* 下支えが無くても鳴る */
+  }
+  return state.silent;
+}
+
+/** iOS 側の Audio Session を起こし直す（プラグインが無い環境では何もしない） */
+function activateBridge() {
+  if (typeof navigator !== 'undefined' && navigator.audioSession) {
+    try {
+      navigator.audioSession.type = 'playback';
+    } catch {
+      /* 未対応 */
+    }
+  }
+  const cap = typeof window !== 'undefined' ? window.Capacitor : null;
+  const bridge = cap && cap.Plugins && cap.Plugins.ShootoutAudio;
+  if (bridge && typeof bridge.activate === 'function') {
+    try {
+      bridge.activate().catch(() => {});
+    } catch {
+      /* ブリッジが古くても続ける */
+    }
+  }
+}
+
+/**
+ * タップ・クリック・キー入力のたびに呼ぶ安全策。
+ * AudioContext が suspend のままなら resume する（戻ってきて最初の操作で音が戻る）。
+ */
+export function ensureAudioRunning() {
+  const ctx = state.ctx;
+  if (!ctx) return false;
+  if (ctx.state === 'running') {
+    ensureSilentAudio();
+    return true;
+  }
+  try {
+    ctx.resume().catch(() => {});
+  } catch {
+    return false;
+  }
+  activateBridge();
+  ensureSilentAudio();
+  return true;
+}
+
 export function suspendForBackground() {
   state.backgrounded = true;
   stopCrowd();
@@ -456,16 +655,28 @@ export function resumeFromBackground({ crowd = false } = {}) {
   const wasBackground = state.backgrounded;
   state.backgrounded = false;
   const ctx = state.ctx;
-  if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
-  if (state.unlocked) {
-    try {
-      state.silent?.play?.().catch(() => {});
-    } catch {
-      /* 下支えが無くても鳴る */
-    }
+  if (!ctx) {
+    /* まだ一度も音を起こしていない（初回起動） */
+    return audioState();
   }
-  if (ctx && state.settings.bgm) startMusic();
-  if (wasBackground && crowd && ctx) startCrowd(state.country);
+  /* 1. アプリ側の Audio Session */
+  activateBridge();
+  /* 2. AudioContext（resume が返らない環境向けに、少し後にもう一度呼ぶ） */
+  const resume = () => {
+    try {
+      ctx.resume().catch(() => {});
+    } catch {
+      /* closed でもゲームは続ける */
+    }
+  };
+  resume();
+  setTimeout(resume, 140);
+  /* 3. 無音の下支え（消えていたら作り直す） */
+  ensureSilentAudio();
+  /* 4. BGM・歓声 */
+  if (state.settings.bgm) startMusic();
+  if (wasBackground && crowd) startCrowd(state.country);
+  state.recoveries += 1;
   return audioState();
 }
 
@@ -479,5 +690,9 @@ export function audioState() {
     music: Boolean(state.musicTimer),
     country: state.country ? state.country.code : null,
     backgrounded: Boolean(state.backgrounded),
+    voice: state.lastVoice ? { ...state.lastVoice } : null,
+    voices: { ...state.voices },
+    silent: Boolean(state.silent),
+    recoveries: state.recoveries,
   };
 }

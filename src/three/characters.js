@@ -12,8 +12,21 @@
  */
 
 import * as THREE from '../../vendor/three.module.min.js';
+import { HAIR_COLORS, HAIR_STYLES } from '../core/countries.js';
 
 export const CHARACTER_STYLES = Object.freeze(['voxel', 'stylized']);
+
+/** 髪型（PRO のスタイリッシュ型のみ）と髪色 */
+export { HAIR_STYLES, HAIR_COLORS };
+
+/** 髪の指定を検証（名前の色も hex も受ける） */
+export function normalizeHair(hair) {
+  const source = hair && typeof hair === 'object' ? hair : {};
+  const style = HAIR_STYLES.includes(source.style) ? source.style : 'short';
+  const raw = source.color || source.tone || 'black';
+  const color = HAIR_COLORS[raw] || (/^#[0-9a-f]{3,8}$/i.test(String(raw)) ? String(raw) : HAIR_COLORS.black);
+  return { style, color };
+}
 
 /** PRO 未加入はブロック、PRO はスタイリッシュ */
 export function characterStyleFor(entitled) {
@@ -74,6 +87,165 @@ function bootMesh(shape, material) {
   return mesh;
 }
 
+/* ------------------------------------------------------------------ *\
+ * 手（Build 4）
+ *   フィールドプレーヤーは ✊（グー）、キーパーは ✋（指の付いたグローブ）。
+ *   腕の先が棒のままだったのを、手の形にして"人"に見えるようにする。
+ *   見た目だけ。能力・確率には触らない。
+ * ------------------------------------------------------------------ */
+
+function buildHand({ materials, style, keeper = false, side = 1 }) {
+  const group = new THREE.Group();
+  const voxel = style === 'voxel';
+
+  if (keeper) {
+    /* ✋ グローブ: 手のひら + 4本の指 + 親指 */
+    const palm = new THREE.Mesh(
+      voxel ? roundedBlock(0.15, 0.15, 0.1, 0.03) : new THREE.SphereGeometry(0.075, 10, 8),
+      materials.gloves,
+    );
+    palm.scale.set(1, voxel ? 1 : 0.92, voxel ? 1 : 0.62);
+    palm.castShadow = true;
+    group.add(palm);
+    for (let i = 0; i < 4; i += 1) {
+      const finger = new THREE.Mesh(
+        voxel ? roundedBlock(0.03, voxel ? 0.1 : 0.11, 0.05, 0.012) : new THREE.CapsuleGeometry(0.018, 0.06, 4, 6),
+        materials.gloves,
+      );
+      finger.position.set(-0.048 + i * 0.032, voxel ? -0.11 : -0.1, 0.008);
+      finger.rotation.x = 0.12;
+      group.add(finger);
+    }
+    const thumb = new THREE.Mesh(
+      voxel ? roundedBlock(0.035, 0.08, 0.05, 0.012) : new THREE.CapsuleGeometry(0.02, 0.05, 4, 6),
+      materials.gloves,
+    );
+    thumb.position.set(side * 0.085, -0.03, 0.01);
+    thumb.rotation.z = side * 0.75;
+    group.add(thumb);
+    group.userData.kind = 'glove';
+  } else {
+    /* ✊ グー: 握ったこぶし（指の筋を2本入れる） */
+    const fist = new THREE.Mesh(
+      voxel ? roundedBlock(0.13, 0.12, 0.12, 0.035) : new THREE.SphereGeometry(0.06, 10, 8),
+      materials.skin,
+    );
+    fist.scale.set(1, voxel ? 1 : 0.94, voxel ? 1 : 0.9);
+    fist.castShadow = true;
+    group.add(fist);
+    for (let i = 0; i < 3; i += 1) {
+      const knuckle = new THREE.Mesh(
+        voxel ? roundedBlock(0.028, 0.05, 0.11, 0.01) : new THREE.CapsuleGeometry(0.008, 0.03, 3, 5),
+        materials.skin,
+      );
+      knuckle.position.set(-0.035 + i * 0.035, -0.005, 0.055);
+      group.add(knuckle);
+    }
+    const thumb = new THREE.Mesh(
+      voxel ? roundedBlock(0.04, 0.07, 0.06, 0.015) : new THREE.CapsuleGeometry(0.016, 0.035, 3, 5),
+      materials.skin,
+    );
+    thumb.position.set(side * 0.055, 0.02, 0.035);
+    thumb.rotation.z = side * 0.6;
+    group.add(thumb);
+    group.userData.kind = 'fist';
+  }
+  return group;
+}
+
+/* ------------------------------------------------------------------ *\
+ * 髪型（Build 4・スタイリッシュ型のみ）
+ *   short / spiky / wave / buzz / topknot
+ *   頭の中心を原点にした部品を返す（呼び出し側が頭の位置へ置く）。
+ * ------------------------------------------------------------------ */
+
+export function buildHairParts(styleName = 'short', materials) {
+  const group = new THREE.Group();
+  const style = HAIR_STYLES.includes(styleName) ? styleName : 'short';
+  const hair = materials.hair;
+
+  /* どの髪型にも共通の"頭蓋"の部分 */
+  const cap = new THREE.Mesh(new THREE.IcosahedronGeometry(0.185, 0), hair);
+  cap.position.set(0, 0.115, -0.008);
+  if (style === 'buzz') cap.scale.set(1.01, 0.5, 1.01);
+  else if (style === 'topknot') cap.scale.set(1, 0.64, 1);
+  else cap.scale.set(1, 0.7, 1);
+  cap.castShadow = true;
+  group.add(cap);
+
+  if (style === 'short') {
+    const fringe = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.055, 0.1), hair);
+    fringe.position.set(0, 0.075, 0.145);
+    fringe.rotation.x = 0.12;
+    group.add(fringe);
+    [-1, 1].forEach((side) => {
+      const burn = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.1, 0.07), hair);
+      burn.position.set(side * 0.155, 0.03, 0.03);
+      group.add(burn);
+    });
+  } else if (style === 'spiky') {
+    /* ツンツン（モヒカン風）: てっぺんから後ろへ5本 */
+    const spikes = [
+      { x: 0, y: 0.23, z: 0.03, h: 0.2, r: 0.06, tilt: -0.15 },
+      { x: -0.075, y: 0.2, z: 0.02, h: 0.16, r: 0.05, tilt: -0.25 },
+      { x: 0.075, y: 0.2, z: 0.02, h: 0.17, r: 0.05, tilt: -0.2 },
+      { x: -0.04, y: 0.19, z: -0.09, h: 0.15, r: 0.05, tilt: -0.6 },
+      { x: 0.05, y: 0.19, z: -0.09, h: 0.14, r: 0.05, tilt: -0.55 },
+    ];
+    spikes.forEach((spike) => {
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(spike.r, spike.h, 5), hair);
+      cone.position.set(spike.x, spike.y, spike.z);
+      cone.rotation.x = spike.tilt;
+      cone.castShadow = true;
+      group.add(cone);
+    });
+  } else if (style === 'wave') {
+    /* ウェーブ（ミディアム）: 後ろと横に丸みを持たせる */
+    [
+      { x: 0, y: 0.06, z: -0.11, s: 0.16 },
+      { x: -0.12, y: 0.04, z: -0.02, s: 0.11 },
+      { x: 0.12, y: 0.04, z: -0.02, s: 0.11 },
+      { x: -0.06, y: 0.05, z: 0.12, s: 0.09 },
+      { x: 0.06, y: 0.05, z: 0.12, s: 0.09 },
+    ].forEach((part) => {
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(part.s, 8, 6), hair);
+      blob.position.set(part.x, part.y, part.z);
+      blob.scale.set(1, 0.85, 0.9);
+      blob.castShadow = true;
+      group.add(blob);
+    });
+    const side = new THREE.Mesh(new THREE.BoxGeometry(0.29, 0.07, 0.12), hair);
+    side.position.set(0, 0.02, 0.13);
+    side.rotation.x = 0.18;
+    group.add(side);
+  } else if (style === 'topknot') {
+    /* トップノット: 後ろ上で束ねる */
+    const bun = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), hair);
+    bun.position.set(0, 0.21, -0.08);
+    bun.scale.set(1, 0.92, 1);
+    bun.castShadow = true;
+    group.add(bun);
+    const tie = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.014, 6, 12), hair);
+    tie.position.set(0, 0.16, -0.075);
+    tie.rotation.x = Math.PI / 2;
+    group.add(tie);
+    const fringe = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.05, 0.09), hair);
+    fringe.position.set(0, 0.07, 0.145);
+    fringe.rotation.x = 0.16;
+    group.add(fringe);
+  } else if (style === 'buzz') {
+    /* バズ（坊主）: 頭蓋に沿う薄い殻だけ */
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(0.181, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.42), hair);
+    shell.position.set(0, 0.1, 0);
+    shell.scale.set(1.01, 1.02, 1.01);
+    group.add(shell);
+  }
+
+  group.userData.style = style;
+  group.userData.kind = 'hair';
+  return group;
+}
+
 function makeMaterials(tone) {
   return {
     shirt: new THREE.MeshStandardMaterial({ roughness: 0.74, metalness: 0.02 }),
@@ -129,7 +301,7 @@ function buildLeg({ materials, side, hipY, hipX, thigh, kneeY, sock, bootShape, 
   return { leg, lower, boot, thighMesh, sockMesh, kneeY };
 }
 
-/** 腕（肩を支点） */
+/** 腕（肩を支点）。先に手（✊ / ✋）を付ける */
 function buildArm({ materials, side, shoulderY, shoulderX, style, keeper }) {
   const arm = new THREE.Group();
   arm.position.set(side * shoulderX, shoulderY, 0);
@@ -148,15 +320,15 @@ function buildArm({ materials, side, shoulderY, shoulderX, style, keeper }) {
   forearm.castShadow = true;
   arm.add(forearm);
 
+  /* ✊ / ✋（キーパーはグローブ付き） */
+  const hand = buildHand({ materials, style, keeper, side });
+  hand.position.y = -0.5;
+  arm.add(hand);
+  arm.userData.hand = hand;
+  arm.userData.kind = keeper ? 'glove' : 'fist';
+
   arm.rotation.z = side * (keeper ? 1.15 : 0.14);
   arm.rotation.x = keeper ? -0.22 : 0.06;
-
-  if (keeper) {
-    const glove = new THREE.Mesh(new THREE.SphereGeometry(0.082, 12, 8), materials.gloves);
-    glove.scale.set(1, 1.2, 0.66);
-    glove.position.y = -0.5;
-    arm.add(glove);
-  }
   return arm;
 }
 
@@ -166,11 +338,14 @@ function buildArm({ materials, side, shoulderY, shoulderX, style, keeper }) {
  *   keeper … グローブ・構えの腕
  *   tone   … 肌と髪の色（0〜5）
  *   footed … 'right' | 'left'（蹴り足。3Dの動きにだけ使う）
+ *   hair   … { style, color }（Build 4。スタイリッシュ型の髪型・髪色。ブロック型はそのまま）
  */
-export function buildCharacter({ style = 'voxel', keeper = false, tone = 0, footed = 'right' } = {}) {
+export function buildCharacter({ style = 'voxel', keeper = false, tone = 0, footed = 'right', hair = null } = {}) {
   const group = new THREE.Group();
   const materials = makeMaterials(tone);
-  const parts = { legs: [], arms: [] };
+  const hairSpec = normalizeHair(hair);
+  materials.hair.color.set(hairSpec.color);
+  const parts = { legs: [], arms: [], hands: [] };
   const isVoxel = style === 'voxel';
   let hipY = 0.7;
 
@@ -248,6 +423,7 @@ export function buildCharacter({ style = 'voxel', keeper = false, tone = 0, foot
       const arm = buildArm({ materials, side, shoulderY: 1.15, shoulderX: 0.27, style, keeper });
       group.add(arm);
       parts.arms.push(arm);
+      if (arm.userData.hand) parts.hands.push(arm.userData.hand);
     });
   } else {
     /* 1️⃣ スタイリッシュ: 4〜4.5頭身のローポリ（平らな面で陰影） */
@@ -285,15 +461,12 @@ export function buildCharacter({ style = 'voxel', keeper = false, tone = 0, foot
     group.add(head);
     parts.head = head;
 
-    /* 髪: とがったローポリ */
-    const hair = new THREE.Mesh(new THREE.IcosahedronGeometry(0.185, 0), materials.hair);
-    hair.position.set(0, 1.66, -0.01);
-    hair.scale.set(1, 0.68, 1);
-    group.add(hair);
-    const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.2, 5), materials.hair);
-    tuft.position.set(0.03, 1.79, 0.02);
-    tuft.rotation.z = -0.3;
-    group.add(tuft);
+    /* 髪: 国別の髪型・髪色（Build 4）。頭の中心を原点にした部品を置く */
+    const hairGroup = new THREE.Group();
+    hairGroup.position.y = 1.54;
+    hairGroup.add(buildHairParts(hairSpec.style, materials));
+    group.add(hairGroup);
+    parts.hairGroup = hairGroup;
     [-1, 1].forEach((side) => {
       const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.1, 0.05), materials.hair);
       jaw.position.set(side * 0.155, 1.55, -0.02);
@@ -334,6 +507,7 @@ export function buildCharacter({ style = 'voxel', keeper = false, tone = 0, foot
       const arm = buildArm({ materials, side, shoulderY: 1.24, shoulderX: 0.235, style, keeper });
       group.add(arm);
       parts.arms.push(arm);
+      if (arm.userData.hand) parts.hands.push(arm.userData.hand);
     });
   }
 
@@ -350,6 +524,8 @@ export function buildCharacter({ style = 'voxel', keeper = false, tone = 0, foot
   group.userData.materials = materials;
   group.userData.style = style;
   group.userData.keeper = Boolean(keeper);
+  group.userData.hair = hairSpec;
+  group.userData.hands = { kind: keeper ? 'glove' : 'fist', count: parts.hands.length };
   group.userData.footed = footed === 'left' ? 'left' : 'right';
   /* 蹴り足: legs[0] = 左, legs[1] = 右 */
   group.userData.kickLeg = group.userData.footed === 'left' ? 0 : 1;
@@ -358,6 +534,27 @@ export function buildCharacter({ style = 'voxel', keeper = false, tone = 0, foot
     hipY,
   };
   return group;
+}
+
+/**
+ * 髪型・髪色を後から差し替える（スタイリッシュ型のみ）。
+ * ブロック型は元のブロック髪のまま（無料モードを変えない）。
+ */
+export function setHair(character, hair) {
+  if (!character) return false;
+  const group = character.userData.parts.hairGroup;
+  if (!group) return false;
+  const spec = normalizeHair(hair);
+  while (group.children.length) {
+    const child = group.children.pop();
+    child.traverse?.((object) => object.geometry?.dispose?.());
+    child.geometry?.dispose?.();
+    group.remove(child);
+  }
+  group.add(buildHairParts(spec.style, character.userData.materials));
+  character.userData.materials.hair.color.set(spec.color);
+  character.userData.hair = spec;
+  return true;
 }
 
 export function setFooted(character, footed) {
