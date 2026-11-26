@@ -1,0 +1,25 @@
+{
+  "name": "shootout4",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SHOOTOUT 4 — IPKSF World Penalty Championship (Capacitor 8 iOS / v1.0.0 Build 1)",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=22.0.0" },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "serve": "node tools/serve.mjs",
+    "www": "node tools/make-www.mjs",
+    "icons": "python3 tools/make-icons.py",
+    "shots": "node tools/shots-prod.mjs",
+    "ios:sync": "node tools/make-www.mjs && npx cap sync ios",
+    "verify:ios": "node tools/verify-ios-project.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.6.2",
+    "@capacitor/ios": "8.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2"
+  }
+}

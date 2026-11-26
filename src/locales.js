@@ -1,0 +1,392 @@
+/**
+ * SHOOTOUT 4 — 日本語 / English / 中文 / 韓国語 の辞書
+ * ほかの7言語は locales-extra.js。どの言語も i18n.js が1つに束ねる。
+ * ブランド名（IPKSF / SHOOTOUT 4 / キット名）は翻訳しない。
+ */
+
+export const BASE = {
+  ja: {
+    nextKick: '次のキック', waitingOpponent: '相手の決定を待っています',
+    home: 'ホーム', back: '戻る', close: '閉じる', cancel: 'キャンセル', confirm: '決定',
+    on: 'ON', off: 'OFF', retry: 'もう一度', copy: 'コピー', copied: 'コピーしました',
+    tagline: '4択の読み合い。世界一は、だれだ。',
+    playCpu: 'CPU対戦', playOnline: '通信対戦', locker: 'ロッカー', pro: 'IPKSF PRO',
+    rank: '世界ランキング', stats: '戦績', rules: '遊び方', settings: '設定', privacy: 'プライバシー',
+    proActive: 'PRO 加盟中', proLocked: 'PRO で解放',
+
+    countryTitle: '国をえらぶ', yourCountry: 'あなたの国', opponentCountry: '対戦相手',
+    cpuLevel: 'CPUの強さ', level_rookie: '初級', level_normal: '中級', level_elite: '上級', level_legend: '最強',
+    changeOpponent: '相手を変える', startMatch: 'キックオフ', randomOpponent: 'おまかせ',
+
+    you: 'あなた', opponent: '相手',
+    shootTitle: 'シュート先を選べ', saveTitle: '飛ぶ方向を選べ',
+    pickZone: '4つのコースから1つ', confirmKick: '決定', timeLeft: '残り',
+    goal: 'ゴール！', save: 'セーブ！', suddenDeath: 'サドンデス', regularTime: '通常PK',
+    firstKick: '先攻', secondKick: '後攻', kicker: 'キッカー', timeoutPick: '時間切れ：自動で選択',
+    quitConfirm: '試合を中断してホームに戻りますか？', turnYou: 'あなたの番', turnOpp: '相手の番',
+    kick: 'キック', keeper: 'GK',
+
+    victory: '勝利', defeat: '敗北', finalScore: '最終スコア', rematch: 'もう一度', backHome: 'ホームへ',
+    goalsScored: '決めたゴール', savesMade: '止めた本数', matchSummary: '試合結果',
+
+    lockerTitle: 'ロッカー', kit: 'ユニフォーム', boots: 'スパイク', preview: '5人そろって着用',
+    apply: '保存して着る', saved: '保存しました', lockedPro: 'PRO 加盟で解放', unlocked: '解放済み',
+    fairness: 'ユニフォームとスパイクは見た目だけ。能力・勝率は変わりません。',
+
+    proTitle: 'IPKSF 公式加盟', proPrice: '買い切り ¥300',
+    oneTime: '買い切り',
+    proBenefitRank: '世界ランキング戦に参戦',
+    proBenefitFriend: 'フレンド対戦（ルームコード）',
+    proBenefitLocker: 'ユニフォーム＆スパイク全解放',
+    proFair: '加盟しても選手能力・勝敗確率は1%も変わりません。',
+    proJoin: 'PRO に加盟する', proRestore: '購入を復元',
+    proMember: 'PRO 加盟中', proNonMember: '未加盟',
+    proPending: '購入の確認待ちです', proFailed: '購入できませんでした',
+    proRestored: '購入を復元しました', proNothing: '復元できる購入がありません',
+    proMockNote: 'プレビュー版のため、いまの購入はテスト動作です（請求は発生しません）。',
+    proDiag: 'ストアの応答',
+
+    onlineTitle: '通信対戦', quickMatch: 'クイックマッチ', friendRoom: 'フレンド対戦',
+    createRoom: 'ルームを作る', joinRoom: 'ルームに入る', roomCode: 'ルームコード',
+    enterCode: 'コードを入力', copyCode: 'コードをコピー', cancelSearch: 'キャンセル',
+    searching: '対戦相手を探しています', opponentFound: '対戦相手が見つかりました',
+    onlineNotConfigured: '通信の設定がありません', onlineProRequired: '世界対戦は PRO 加盟が必要です',
+    stampsTitle: 'スタンプ', stamp_hello: 'よろしく', stamp_nice: 'ナイス', stamp_oops: 'あちゃー',
+    stamp_gg: 'いい勝負', stamp_thanks: 'ありがとう', stamp_wow: 'すごい',
+    leaveMatch: '退出', opponentLeft: '相手が退出しました', connectionError: '通信が切れました',
+    scopeDomestic: '国内', scopeWorld: '世界',
+
+    rankTitle: '世界ランキング', rankNote: 'PRO 加盟者のレート戦のみ。月間でリセットされます。',
+    rankProOnly: 'ランキングは PRO 加盟で参加できます', noRankData: 'まだ記録がありません',
+    points: 'ポイント', rankYourRank: 'あなたの順位',
+
+    statsTitle: '戦績', played: '試合', wins: '勝利', losses: '敗北', winRate: '勝率',
+    goalsFor: '決めた', goalsAgainst: '決められた', streak: '連勝', resetStats: '戦績をリセット',
+    resetConfirm: '戦績をリセットしますか？',
+
+    rulesTitle: '遊び方', rulesFair: '課金で強くなることはありません。',
+    rulesText: '両チームが交互に5本ずつ蹴ります。あなたは「狙う方向」か「飛ぶ方向」を4つ（左上・右上・左下・右下）から選び、7秒以内に決定ボタンで確定します。相手も同時に選んでいて、両方が決まった瞬間に結果が出ます。狙った方向と飛んだ方向が同じならセーブ、違えばゴール。5本を終えて同点なら、6本目からサドンデスです。残りの本数で追いつけなくなった時点で試合は終わります。',
+
+    settingsTitle: '設定', sound: '効果音', bgm: 'BGM', vibrate: 'バイブ', textSize: '文字サイズ',
+    size_standard: '標準', size_large: '大', size_extra: '特大', language: '言語',
+    timeOfDay: '時間帯', dayMode: 'デイ', nightMode: 'ナイター', replayIntro: 'オープニングを再生',
+    restorePurchases: '購入を復元', resetAll: 'データをリセット', resetAllConfirm: '保存した設定と戦績を消しますか？',
+    nickname: 'ニックネーム',
+
+    privacyTitle: 'プライバシーポリシー',
+    privacyText: '本アプリは、ニックネーム・国・設定・戦績を端末内にのみ保存します。通信対戦では、対戦相手にニックネーム・国・選んだ方向だけが送られます。氏名・メール・位置情報・連絡先は取得しません。課金は Apple の App Store を通じて処理され、カード情報がアプリに渡ることはありません。通信には Supabase Realtime の公開チャンネルを使用し、自由入力のチャットはありません。',
+
+    championship: 'IPKSF 世界PK選手権', skip: 'タップでスキップ', soundStart: '音ありで開始',
+    zone_TL: '左上', zone_TR: '右上', zone_BL: '左下', zone_BR: '右下',
+    shots: 'シュート', saves: 'セーブ', versionNote: 'IPKSF 非公認のオリジナル競技です。',
+    freeTag: '無料', proTag: 'PRO',
+  },
+
+  en: {
+    nextKick: 'Next kick', waitingOpponent: 'Waiting for your opponent',
+    home: 'Home', back: 'Back', close: 'Close', cancel: 'Cancel', confirm: 'Confirm',
+    on: 'ON', off: 'OFF', retry: 'Try again', copy: 'Copy', copied: 'Copied',
+    tagline: 'Four choices. One mind game. One world champion.',
+    playCpu: 'CPU MATCH', playOnline: 'ONLINE', locker: 'Locker', pro: 'IPKSF PRO',
+    rank: 'World ranking', stats: 'Record', rules: 'How to play', settings: 'Settings', privacy: 'Privacy',
+    proActive: 'PRO member', proLocked: 'Unlock with PRO',
+
+    countryTitle: 'Choose your nation', yourCountry: 'Your nation', opponentCountry: 'Opponent',
+    cpuLevel: 'CPU strength', level_rookie: 'Rookie', level_normal: 'Normal', level_elite: 'Elite', level_legend: 'Legend',
+    changeOpponent: 'Change opponent', startMatch: 'Kick off', randomOpponent: 'Surprise me',
+
+    you: 'YOU', opponent: 'RIVAL',
+    shootTitle: 'Pick your corner', saveTitle: 'Pick your dive',
+    pickZone: 'One of four corners', confirmKick: 'Confirm', timeLeft: 'Time',
+    goal: 'GOAL!', save: 'SAVED!', suddenDeath: 'Sudden death', regularTime: 'Regular PK',
+    firstKick: 'First', secondKick: 'Second', kicker: 'Kicker', timeoutPick: 'Time up: auto pick',
+    quitConfirm: 'Leave this match and return home?', turnYou: 'Your kick', turnOpp: 'Their kick',
+    kick: 'Kick', keeper: 'GK',
+
+    victory: 'VICTORY', defeat: 'DEFEAT', finalScore: 'Final score', rematch: 'Rematch', backHome: 'Home',
+    goalsScored: 'Goals scored', savesMade: 'Saves made', matchSummary: 'Match result',
+
+    lockerTitle: 'Locker', kit: 'Kit', boots: 'Boots', preview: 'Worn by all five',
+    apply: 'Save and wear', saved: 'Saved', lockedPro: 'Unlock with PRO', unlocked: 'Unlocked',
+    fairness: 'Kits and boots are cosmetic only. Abilities and win chances never change.',
+
+    proTitle: 'Official IPKSF membership', proPrice: 'One-time ¥300',
+    oneTime: 'one-time',
+    proBenefitRank: 'Enter world ranked matches',
+    proBenefitFriend: 'Friend matches with room codes',
+    proBenefitLocker: 'Every kit and boot unlocked',
+    proFair: 'Membership never changes player ability or win probability.',
+    proJoin: 'Join PRO', proRestore: 'Restore purchase',
+    proMember: 'PRO member', proNonMember: 'Not a member',
+    proPending: 'Purchase is pending', proFailed: 'Purchase did not complete',
+    proRestored: 'Purchase restored', proNothing: 'No purchase to restore',
+    proMockNote: 'Preview build: purchases here are test unlocks and never charge you.',
+    proDiag: 'Store response',
+
+    onlineTitle: 'Online', quickMatch: 'Quick match', friendRoom: 'Friend match',
+    createRoom: 'Create room', joinRoom: 'Join room', roomCode: 'Room code',
+    enterCode: 'Enter code', copyCode: 'Copy code', cancelSearch: 'Cancel',
+    searching: 'Looking for an opponent', opponentFound: 'Opponent found',
+    onlineNotConfigured: 'Online is not configured', onlineProRequired: 'World matches need PRO',
+    stampsTitle: 'Stamps', stamp_hello: 'Hello', stamp_nice: 'Nice', stamp_oops: 'Oops',
+    stamp_gg: 'Good game', stamp_thanks: 'Thanks', stamp_wow: 'Wow',
+    leaveMatch: 'Leave', opponentLeft: 'Your opponent left', connectionError: 'Connection lost',
+    scopeDomestic: 'Domestic', scopeWorld: 'World',
+
+    rankTitle: 'World ranking', rankNote: 'PRO rated matches only. Rank resets monthly.',
+    rankProOnly: 'Ranked play requires PRO', noRankData: 'No results yet',
+    points: 'Points', rankYourRank: 'Your position',
+
+    statsTitle: 'Record', played: 'Matches', wins: 'Wins', losses: 'Losses', winRate: 'Win rate',
+    goalsFor: 'Scored', goalsAgainst: 'Conceded', streak: 'Streak', resetStats: 'Reset record',
+    resetConfirm: 'Reset your record?',
+
+    rulesTitle: 'How to play', rulesFair: 'Nothing you can buy makes you stronger.',
+    rulesText: 'The teams take five kicks each, alternating. Choose one of four corners (top left, top right, bottom left, bottom right) and confirm within seven seconds. Your opponent chooses at the same time, and the result appears the moment both are in. Same corner as the keeper means a save; a different corner is a goal. If the score is level after five kicks each, the shootout continues from the sixth kick as sudden death. The match also ends as soon as the remaining kicks can no longer change the result.',
+
+    settingsTitle: 'Settings', sound: 'Sound', bgm: 'Music', vibrate: 'Vibration', textSize: 'Text size',
+    size_standard: 'Standard', size_large: 'Large', size_extra: 'Extra large', language: 'Language',
+    timeOfDay: 'Time of day', dayMode: 'Day', nightMode: 'Night', replayIntro: 'Replay opening',
+    restorePurchases: 'Restore purchases', resetAll: 'Reset data', resetAllConfirm: 'Delete your settings and record?',
+    nickname: 'Nickname',
+
+    privacyTitle: 'Privacy policy',
+    privacyText: 'This app stores your nickname, nation, settings and record on your device only. In online matches, only your nickname, nation and chosen corner are sent to your opponent. We never collect your name, email, location or contacts. Purchases are handled by Apple App Store, and card details never reach the app. Online play uses public Supabase Realtime channels and has no free-text chat.',
+
+    championship: 'IPKSF World Penalty Championship', skip: 'Tap to skip', soundStart: 'Start with sound',
+    zone_TL: 'Top left', zone_TR: 'Top right', zone_BL: 'Bottom left', zone_BR: 'Bottom right',
+    shots: 'Shots', saves: 'Saves', versionNote: 'An original competition, not affiliated with any real federation.',
+    freeTag: 'FREE', proTag: 'PRO',
+  },
+
+  'zh-Hans': {
+    nextKick: '下一球', waitingOpponent: '等待对手确认',
+    home: '主页', back: '返回', close: '关闭', cancel: '取消', confirm: '确定',
+    on: '开', off: '关', retry: '重试', copy: '复制', copied: '已复制',
+    tagline: '四选一的心理战。世界第一是谁。',
+    playCpu: '对战电脑', playOnline: '联机对战', locker: '更衣室', pro: 'IPKSF PRO',
+    rank: '世界排名', stats: '战绩', rules: '玩法', settings: '设置', privacy: '隐私',
+    proActive: 'PRO 会员', proLocked: '开通 PRO 解锁',
+
+    countryTitle: '选择国家', yourCountry: '你的国家', opponentCountry: '对手',
+    cpuLevel: 'CPU 强度', level_rookie: '初级', level_normal: '中级', level_elite: '高级', level_legend: '最强',
+    changeOpponent: '更换对手', startMatch: '开球', randomOpponent: '随机',
+
+    you: '你', opponent: '对手',
+    shootTitle: '选择射门方向', saveTitle: '选择扑救方向',
+    pickZone: '四个角选一个', confirmKick: '确定', timeLeft: '剩余',
+    goal: '进球！', save: '扑出！', suddenDeath: '突然死亡', regularTime: '常规点球',
+    firstKick: '先踢', secondKick: '后踢', kicker: '主罚', timeoutPick: '超时：自动选择',
+    quitConfirm: '中断比赛并返回主页？', turnYou: '轮到你', turnOpp: '轮到对手',
+    kick: '罚球', keeper: '门将',
+
+    victory: '胜利', defeat: '失败', finalScore: '最终比分', rematch: '再来一场', backHome: '返回主页',
+    goalsScored: '进球数', savesMade: '扑救数', matchSummary: '比赛结果',
+
+    lockerTitle: '更衣室', kit: '球衣', boots: '球鞋', preview: '五名球员统一穿着',
+    apply: '保存并穿上', saved: '已保存', lockedPro: '开通 PRO 解锁', unlocked: '已解锁',
+    fairness: '球衣和球鞋只改变外观，能力与胜率不变。',
+
+    proTitle: 'IPKSF 官方会员', proPrice: '一次性 ¥300',
+    oneTime: '一次性',
+    proBenefitRank: '参加世界排名赛',
+    proBenefitFriend: '好友对战（房间码）',
+    proBenefitLocker: '球衣和球鞋全部解锁',
+    proFair: '加入会员不会改变球员能力或胜负概率。',
+    proJoin: '加入 PRO', proRestore: '恢复购买',
+    proMember: 'PRO 会员', proNonMember: '未加入',
+    proPending: '购买待确认', proFailed: '购买未完成',
+    proRestored: '已恢复购买', proNothing: '没有可恢复的购买',
+    proMockNote: '预览版：此处的购买为测试解锁，不会产生费用。',
+    proDiag: '商店回应',
+
+    onlineTitle: '联机对战', quickMatch: '快速匹配', friendRoom: '好友对战',
+    createRoom: '创建房间', joinRoom: '加入房间', roomCode: '房间码',
+    enterCode: '输入房间码', copyCode: '复制房间码', cancelSearch: '取消',
+    searching: '正在寻找对手', opponentFound: '找到对手',
+    onlineNotConfigured: '未配置联机服务', onlineProRequired: '世界对战需要 PRO',
+    stampsTitle: '表情', stamp_hello: '你好', stamp_nice: '漂亮', stamp_oops: '哎呀',
+    stamp_gg: '好比赛', stamp_thanks: '谢谢', stamp_wow: '厉害',
+    leaveMatch: '退出', opponentLeft: '对手已退出', connectionError: '连接已断开',
+    scopeDomestic: '国内', scopeWorld: '世界',
+
+    rankTitle: '世界排名', rankNote: '仅限 PRO 计分赛，每月重置。',
+    rankProOnly: '排名赛需要 PRO', noRankData: '还没有记录',
+    points: '积分', rankYourRank: '你的排名',
+
+    statsTitle: '战绩', played: '比赛', wins: '胜', losses: '负', winRate: '胜率',
+    goalsFor: '进球', goalsAgainst: '失球', streak: '连胜', resetStats: '重置战绩',
+    resetConfirm: '重置战绩？',
+
+    rulesTitle: '玩法', rulesFair: '付费不会让你变强。',
+    rulesText: '两队交替各罚五球。你从四个角（左上、右上、左下、右下）中选择射门或扑救方向，并在七秒内按确定。对手同时选择，双方都确定后立即出结果。与门将方向相同则被扑出，不同则进球。五球后平分则从第六球开始突然死亡。当剩余球数已无法改变结果时，比赛立即结束。',
+
+    settingsTitle: '设置', sound: '音效', bgm: '音乐', vibrate: '震动', textSize: '文字大小',
+    size_standard: '标准', size_large: '大', size_extra: '特大', language: '语言',
+    timeOfDay: '时段', dayMode: '白天', nightMode: '夜场', replayIntro: '重播开场',
+    restorePurchases: '恢复购买', resetAll: '重置数据', resetAllConfirm: '删除设置和战绩？',
+    nickname: '昵称',
+
+    privacyTitle: '隐私政策',
+    privacyText: '本应用仅在设备内保存昵称、国家、设置和战绩。联机对战时只向对手发送昵称、国家和所选方向。不收集姓名、邮箱、位置或通讯录。购买通过 Apple App Store 处理，卡片信息不会传给应用。联机使用 Supabase Realtime 公开频道，没有自由输入聊天。',
+
+    championship: 'IPKSF 世界点球锦标赛', skip: '点击跳过', soundStart: '开启声音开始',
+    zone_TL: '左上', zone_TR: '右上', zone_BL: '左下', zone_BR: '右下',
+    shots: '射门', saves: '扑救', versionNote: '原创赛事，与现实中的任何联盟无关。',
+    freeTag: '免费', proTag: 'PRO',
+  },
+
+  'zh-Hant': {
+    nextKick: '下一球', waitingOpponent: '等待對手確認',
+    home: '首頁', back: '返回', close: '關閉', cancel: '取消', confirm: '確定',
+    on: '開', off: '關', retry: '重試', copy: '複製', copied: '已複製',
+    tagline: '四選一的心理戰。世界第一是誰。',
+    playCpu: '對戰電腦', playOnline: '連線對戰', locker: '更衣室', pro: 'IPKSF PRO',
+    rank: '世界排名', stats: '戰績', rules: '玩法', settings: '設定', privacy: '隱私',
+    proActive: 'PRO 會員', proLocked: '開通 PRO 解鎖',
+
+    countryTitle: '選擇國家', yourCountry: '你的國家', opponentCountry: '對手',
+    cpuLevel: 'CPU 強度', level_rookie: '初級', level_normal: '中級', level_elite: '高級', level_legend: '最強',
+    changeOpponent: '更換對手', startMatch: '開球', randomOpponent: '隨機',
+
+    you: '你', opponent: '對手',
+    shootTitle: '選擇射門方向', saveTitle: '選擇撲救方向',
+    pickZone: '四個角落選一個', confirmKick: '確定', timeLeft: '剩餘',
+    goal: '進球！', save: '撲出！', suddenDeath: '驟死賽', regularTime: '一般點球',
+    firstKick: '先踢', secondKick: '後踢', kicker: '主罰', timeoutPick: '逾時：自動選擇',
+    quitConfirm: '中斷比賽並回首頁？', turnYou: '輪到你', turnOpp: '輪到對手',
+    kick: '罰球', keeper: '門將',
+
+    victory: '勝利', defeat: '落敗', finalScore: '最終比分', rematch: '再來一場', backHome: '回首頁',
+    goalsScored: '進球數', savesMade: '撲救數', matchSummary: '比賽結果',
+
+    lockerTitle: '更衣室', kit: '球衣', boots: '球鞋', preview: '五名球員統一穿著',
+    apply: '儲存並穿上', saved: '已儲存', lockedPro: '開通 PRO 解鎖', unlocked: '已解鎖',
+    fairness: '球衣和球鞋只改變外觀，能力與勝率不變。',
+
+    proTitle: 'IPKSF 官方會員', proPrice: '一次買斷 ¥300',
+    oneTime: '一次買斷',
+    proBenefitRank: '參加世界排名賽',
+    proBenefitFriend: '好友對戰（房間碼）',
+    proBenefitLocker: '球衣和球鞋全部解鎖',
+    proFair: '加入會員不會改變球員能力或勝負機率。',
+    proJoin: '加入 PRO', proRestore: '恢復購買',
+    proMember: 'PRO 會員', proNonMember: '未加入',
+    proPending: '購買待確認', proFailed: '購買未完成',
+    proRestored: '已恢復購買', proNothing: '沒有可恢復的購買',
+    proMockNote: '預覽版：此處的購買為測試解鎖，不會產生費用。',
+    proDiag: '商店回應',
+
+    onlineTitle: '連線對戰', quickMatch: '快速配對', friendRoom: '好友對戰',
+    createRoom: '建立房間', joinRoom: '加入房間', roomCode: '房間碼',
+    enterCode: '輸入房間碼', copyCode: '複製房間碼', cancelSearch: '取消',
+    searching: '正在尋找對手', opponentFound: '找到對手',
+    onlineNotConfigured: '未設定連線服務', onlineProRequired: '世界對戰需要 PRO',
+    stampsTitle: '貼圖', stamp_hello: '你好', stamp_nice: '漂亮', stamp_oops: '哎呀',
+    stamp_gg: '好比賽', stamp_thanks: '謝謝', stamp_wow: '厲害',
+    leaveMatch: '退出', opponentLeft: '對手已退出', connectionError: '連線已中斷',
+    scopeDomestic: '國內', scopeWorld: '世界',
+
+    rankTitle: '世界排名', rankNote: '僅限 PRO 計分賽，每月重置。',
+    rankProOnly: '排名賽需要 PRO', noRankData: '還沒有紀錄',
+    points: '積分', rankYourRank: '你的排名',
+
+    statsTitle: '戰績', played: '比賽', wins: '勝', losses: '負', winRate: '勝率',
+    goalsFor: '進球', goalsAgainst: '失球', streak: '連勝', resetStats: '重設戰績',
+    resetConfirm: '重設戰績？',
+
+    rulesTitle: '玩法', rulesFair: '付費不會讓你變強。',
+    rulesText: '兩隊交替各罰五球。你從四個角落（左上、右上、左下、右下）中選擇射門或撲救方向，並在七秒內按確定。對手同時選擇，雙方都確定後立即出結果。與門將方向相同則被撲出，不同則進球。五球後平手則從第六球開始驟死賽。當剩餘球數已無法改變結果時，比賽立即結束。',
+
+    settingsTitle: '設定', sound: '音效', bgm: '音樂', vibrate: '震動', textSize: '文字大小',
+    size_standard: '標準', size_large: '大', size_extra: '特大', language: '語言',
+    timeOfDay: '時段', dayMode: '白天', nightMode: '夜場', replayIntro: '重播開場',
+    restorePurchases: '恢復購買', resetAll: '重設資料', resetAllConfirm: '刪除設定和戰績？',
+    nickname: '暱稱',
+
+    privacyTitle: '隱私政策',
+    privacyText: '本應用僅在裝置內保存暱稱、國家、設定和戰績。連線對戰時只向對手發送暱稱、國家和所選方向。不收集姓名、電子郵件、位置或通訊錄。購買透過 Apple App Store 處理，卡片資訊不會傳給應用。連線使用 Supabase Realtime 公開頻道，沒有自由輸入聊天。',
+
+    championship: 'IPKSF 世界十二碼錦標賽', skip: '點擊跳過', soundStart: '開啟聲音開始',
+    zone_TL: '左上', zone_TR: '右上', zone_BL: '左下', zone_BR: '右下',
+    shots: '射門', saves: '撲救', versionNote: '原創賽事，與現實中的任何聯盟無關。',
+    freeTag: '免費', proTag: 'PRO',
+  },
+
+  ko: {
+    nextKick: '다음 킥', waitingOpponent: '상대의 결정을 기다리는 중',
+    home: '홈', back: '뒤로', close: '닫기', cancel: '취소', confirm: '결정',
+    on: '켜기', off: '끄기', retry: '다시', copy: '복사', copied: '복사했습니다',
+    tagline: '네 방향의 심리전. 세계 최강은 누구인가.',
+    playCpu: 'CPU 대전', playOnline: '온라인 대전', locker: '라커룸', pro: 'IPKSF PRO',
+    rank: '세계 랭킹', stats: '전적', rules: '게임 방법', settings: '설정', privacy: '개인정보',
+    proActive: 'PRO 가입 중', proLocked: 'PRO로 해금',
+
+    countryTitle: '국가 선택', yourCountry: '내 국가', opponentCountry: '상대',
+    cpuLevel: 'CPU 강도', level_rookie: '초급', level_normal: '중급', level_elite: '상급', level_legend: '최강',
+    changeOpponent: '상대 변경', startMatch: '킥오프', randomOpponent: '랜덤',
+
+    you: '나', opponent: '상대',
+    shootTitle: '슛 방향을 선택', saveTitle: '다이빙 방향을 선택',
+    pickZone: '네 구석 중 하나', confirmKick: '결정', timeLeft: '남은 시간',
+    goal: '골!', save: '선방!', suddenDeath: '서든데스', regularTime: '정규 PK',
+    firstKick: '선공', secondKick: '후공', kicker: '키커', timeoutPick: '시간 초과: 자동 선택',
+    quitConfirm: '경기를 중단하고 홈으로 돌아갈까요?', turnYou: '내 차례', turnOpp: '상대 차례',
+    kick: '킥', keeper: 'GK',
+
+    victory: '승리', defeat: '패배', finalScore: '최종 스코어', rematch: '다시 경기', backHome: '홈으로',
+    goalsScored: '득점', savesMade: '선방', matchSummary: '경기 결과',
+
+    lockerTitle: '라커룸', kit: '유니폼', boots: '축구화', preview: '5명이 함께 착용',
+    apply: '저장하고 착용', saved: '저장했습니다', lockedPro: 'PRO로 해금', unlocked: '해금됨',
+    fairness: '유니폼과 축구화는 겉모습뿐. 능력과 승률은 변하지 않습니다.',
+
+    proTitle: 'IPKSF 공식 가입', proPrice: '1회 구매 ¥300',
+    oneTime: '1회 구매',
+    proBenefitRank: '세계 랭킹전 참가',
+    proBenefitFriend: '친구 대전(룸 코드)',
+    proBenefitLocker: '유니폼과 축구화 전체 해금',
+    proFair: '가입해도 선수 능력과 승률은 1%도 변하지 않습니다.',
+    proJoin: 'PRO 가입', proRestore: '구매 복원',
+    proMember: 'PRO 가입 중', proNonMember: '미가입',
+    proPending: '구매 확인 대기 중', proFailed: '구매하지 못했습니다',
+    proRestored: '구매를 복원했습니다', proNothing: '복원할 구매가 없습니다',
+    proMockNote: '미리보기 버전이라 지금의 구매는 테스트 해금이며 청구되지 않습니다.',
+    proDiag: '스토어 응답',
+
+    onlineTitle: '온라인 대전', quickMatch: '빠른 매치', friendRoom: '친구 대전',
+    createRoom: '방 만들기', joinRoom: '방 들어가기', roomCode: '룸 코드',
+    enterCode: '코드 입력', copyCode: '코드 복사', cancelSearch: '취소',
+    searching: '상대를 찾는 중', opponentFound: '상대를 찾았습니다',
+    onlineNotConfigured: '온라인 설정이 없습니다', onlineProRequired: '세계 대전은 PRO가 필요합니다',
+    stampsTitle: '스탬프', stamp_hello: '안녕', stamp_nice: '나이스', stamp_oops: '앗',
+    stamp_gg: '좋은 경기', stamp_thanks: '고마워', stamp_wow: '대단해',
+    leaveMatch: '나가기', opponentLeft: '상대가 나갔습니다', connectionError: '연결이 끊겼습니다',
+    scopeDomestic: '국내', scopeWorld: '세계',
+
+    rankTitle: '세계 랭킹', rankNote: 'PRO 레이팅전만. 매달 초기화됩니다.',
+    rankProOnly: '랭킹은 PRO 가입이 필요합니다', noRankData: '아직 기록이 없습니다',
+    points: '포인트', rankYourRank: '내 순위',
+
+    statsTitle: '전적', played: '경기', wins: '승', losses: '패', winRate: '승률',
+    goalsFor: '득점', goalsAgainst: '실점', streak: '연승', resetStats: '전적 초기화',
+    resetConfirm: '전적을 초기화할까요?',
+
+    rulesTitle: '게임 방법', rulesFair: '과금으로 강해지지 않습니다.',
+    rulesText: '두 팀이 번갈아 5개씩 찹니다. 네 구석(왼쪽 위, 오른쪽 위, 왼쪽 아래, 오른쪽 아래) 중 하나를 골라 7초 안에 결정을 누릅니다. 상대도 동시에 고르고, 둘 다 정해진 순간 결과가 나옵니다. 골키퍼 방향과 같으면 선방, 다르면 골입니다. 5개씩 마치고 동점이면 6번째부터 서든데스입니다. 남은 개수로 따라잡을 수 없게 되면 경기가 끝납니다.',
+
+    settingsTitle: '설정', sound: '효과음', bgm: '음악', vibrate: '진동', textSize: '글자 크기',
+    size_standard: '표준', size_large: '크게', size_extra: '아주 크게', language: '언어',
+    timeOfDay: '시간대', dayMode: '낮', nightMode: '야간', replayIntro: '오프닝 다시 보기',
+    restorePurchases: '구매 복원', resetAll: '데이터 초기화', resetAllConfirm: '설정과 전적을 삭제할까요?',
+    nickname: '닉네임',
+
+    privacyTitle: '개인정보 처리방침',
+    privacyText: '이 앱은 닉네임, 국가, 설정, 전적을 기기 안에만 저장합니다. 온라인 대전에서는 닉네임, 국가, 선택한 방향만 상대에게 전송됩니다. 이름, 이메일, 위치, 연락처는 수집하지 않습니다. 결제는 Apple App Store에서 처리되며 카드 정보가 앱에 전달되지 않습니다. 온라인은 Supabase Realtime 공개 채널을 사용하며 자유 입력 채팅은 없습니다.',
+
+    championship: 'IPKSF 세계 승부차기 선수권', skip: '탭하여 건너뛰기', soundStart: '소리 켜고 시작',
+    zone_TL: '왼쪽 위', zone_TR: '오른쪽 위', zone_BL: '왼쪽 아래', zone_BR: '오른쪽 아래',
+    shots: '슈팅', saves: '선방', versionNote: '실제 연맹과 무관한 오리지널 대회입니다.',
+    freeTag: '무료', proTag: 'PRO',
+  },
+};
