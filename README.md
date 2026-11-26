@@ -1,6 +1,6 @@
 # SHOOTOUT 4 — IPKSF World Penalty Championship
 
-iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 5）。
+iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 6）。
 `クイック対戦`・`CPU対戦`・`フレンド対戦`・`世界ランキング`・`ロッカー（キャラクター＋4部位）`・
 `IPKSF 公式加盟（PRO・買い切り ¥300）` を、Capacitor 8 + 素の HTML/CSS/JS（ES Modules）で実装しています。
 
@@ -140,6 +140,9 @@ npx cap sync ios            # www → ios/App/App/public
 
 ## バージョン
 
+- v1.0.0 / Build 6（2026-11-27）
+  - **棒読みのボイスを廃止し、音だけで演出を強化**：「ゴール！」「セーブ！」「ミスキック！」の音声読み上げ（iOS の `AVSpeechSynthesizer`・ブラウザの `speechSynthesis`・フォルマント合成）を完全に削除。代わりに、ゴールは低音の厚みのあるブラス和音（スタジアムホーン）＋上昇する勝利のファンファーレ、セーブは観客の「オオオッ！」というどよめき＋力強いグローブストップ＆クリア音、ミスキックは観客の「アァ〜…」という落胆（下がる歓声＋ため息）で盛り上げる（`goalRoar()` / `crowdSurge()` と重ねる）
+  - **他アプリから戻ったとき BGM が消える不具合を完全修正**：`onAppVisible()`（`visibilitychange` / `focus`＝ユーザー操作ではない）で `ensureAudioRunning()` を呼び、復帰フラグを空消費していたのをやめた。復帰後の最初のタップ・キー入力で、古い `AudioContext` を `close()` して作り直し、音量・Audio Session・無音1サンプル・BGM・試合中の歓声を張り直す（`suspendForBackground()` では古い無音 `<audio>` を破棄）
 - v1.0.0 / Build 5（2026-11-27）
   - **利き足の蹴り分けを修正**：キャラクターは +Z が正面なので、右足は `legs[0]`（side -1）・左足は `legs[1]`（side +1）。右利きは右足、左利きは左足で振り抜くようになった（それまでは全員が左足で蹴っていた）
   - **判定のボイスを人の声に**：iOS は `AVSpeechSynthesizer`（Capacitor の `ShootoutAudio.speak`）で「ゴール！」「セーブ！」「ミスキック！」を発声。ブラウザは `speechSynthesis`＋補助のフォルマント、どちらも無い環境はフォルマント合成。絵文字・記号は読ませない（12言語）

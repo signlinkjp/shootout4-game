@@ -1,6 +1,6 @@
-# SHOOTOUT 4 iOS TestFlight Build 5
+# SHOOTOUT 4 iOS TestFlight Build 6
 # ============================================================
-# SHOOTOUT 4 v1.0.0（Build 5）を TestFlight へ配信するワークフロー。
+# SHOOTOUT 4 v1.0.0（Build 6）を TestFlight へ配信するワークフロー。
 # トモアキさんが Safari で GitHub に貼り付ける用（DOROKEI / JANKeN PoN と同じ手順）。
 #
 # 置き場所（新リポジトリ）:
@@ -18,7 +18,7 @@
 # ★ ビルド番号はこのファイルに書きません。
 #   ios/App/App.xcodeproj/project.pbxproj の CURRENT_PROJECT_VERSION を
 #   そのまま読み取って使います（MARKETING_VERSION も同じ）。
-#   Build 5 にするときは pbxproj の番号を 5 に上げるだけです。
+#   Build 6 にするときは pbxproj の番号を 6 に上げるだけです。
 #
 # 必要な Secrets（既存リポジトリと同じ値）:
 #   APPLE_TEAM_ID                   … 例 TGBNH8WJV6

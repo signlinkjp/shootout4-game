@@ -27,10 +27,8 @@ const state = {
   voices: {},
   lastVoice: null,
   recoveries: 0,
-  /* Build 5: バックグラウンドから戻った最初の操作で、1回だけ強制的に音を起こし直す */
+  /* Build 5/6: バックグラウンドから戻った最初の操作で、1回だけ強制的に音を起こし直す */
   needsGestureRecovery: false,
-  /* Build 5: ボイスをどの経路で鳴らしたか（native = iOS の AVSpeechSynthesizer / browser = speechSynthesis / formant = 合成） */
-  speech: { native: 0, browser: 0, formant: 0, silent: 0 },
 };
 
 const AC = () => (typeof window === 'undefined' ? null : window.AudioContext || window.webkitAudioContext);
@@ -283,13 +281,6 @@ export function goalRoar(seconds = 2.2) {
   vibrate([40, 40, 70]);
 }
 
-export function saveGroan() {
-  if (!state.settings.sound) return;
-  noise({ dur: 0.85, gain: 0.24, low: 180, high: 1300, q: 0.6, bus: 'crowdBus' });
-  tone({ freq: 320, end: 190, dur: 0.5, gain: 0.045, type: 'sine', delay: 0.05 });
-  vibrate(50);
-}
-
 export function uiSwitch() {
   if (!state.settings.sound) return;
   tone({ freq: 420, end: 620, dur: 0.07, gain: 0.04, type: 'triangle' });
@@ -305,254 +296,140 @@ export function purchaseChime(ok = true) {
 }
 
 /* ------------------------------------------------------------------ *\
- * ボイス（ゴール！ / セーブ！ / ミスキック！）— Build 4 / Build 5 で人の声に
+ * 演出音（Build 6: 棒読みの読み上げを廃止し、音だけで判定を盛り上げる）
  *
- * 着弾の瞬間に、判定を言葉で叫ぶ。Build 4 は WebAudio のフォルマント合成
- * だけだったため、言葉として聞き取れず歓声に埋もれていた。Build 5 は次の順で鳴らす:
- *   1. iOS（Capacitor）… ShootoutAudio プラグインの speak（AVSpeechSynthesizer）
- *   2. ブラウザ……… window.speechSynthesis（声がある環境だけ）＋ 補助のフォルマント
- *   3. どちらも無い…… フォルマント合成だけ（必ず何か鳴らす）
- * どの経路でも state.voices / state.lastVoice に記録を残す（テストと検証用）。
- * 設定（prefs.sound）が OFF のときは鳴らさない。絵文字・記号は読ませない。
+ *  Build 4/5 は判定を言葉で叫んでいた（iOS の音声読み上げ機能、ブラウザの
+ *  音声合成、どちらも無ければ電子音の合成）。しかし、どの経路も棒読み・電子音に
+ *  しかならず、スタジアムの熱狂には届かなかった。Build 6 は音声の読み上げを
+ *  完全に外し、着弾の瞬間の「音」だけで演出する:
+ *    goal … 低音の厚みのあるブラス和音（スタジアムホーン）
+ *            ＋上昇する勝利のファンファーレ。goalRoar() / crowdSurge() と重ねる
+ *    save … 観客の「オオオッ！」というどよめき＋力強いグローブストップ＆クリア音
+ *    miss … 観客の「アァ〜…」という落胆（ピッチが下がる歓声＋ため息）
+ *  鳴らした判定は state.voices / state.lastVoice に残す（テスト・実機検証用）。
  * ------------------------------------------------------------------ */
 
-/** 母音のフォルマント（F1, F2）。声の「あいうえお」を作る2つの共鳴周波数。 */
-const VOWEL_FORMANTS = {
-  a: [800, 1180],
-  o: [470, 820],
-  u: [330, 700],
-  e: [520, 1780],
-  i: [300, 2250],
-  n: [260, 1100],
-};
-
-/** 読み上げに使える文字（文字・数字・空白・アポストロフィ・ハイフン）だけを残す */
-const UNSPEAKABLE = /[^\p{L}\p{N}\s'’ʼ\-]/gu;
-
-/**
- * 発話用のテキスト。絵文字・記号を落とす。
- * 「ゴール！」→「ゴール」、「MISS KICK 😭💦」→「MISS KICK」。
- */
-export function speakableText(text) {
-  return String(text == null ? '' : text)
-    .replace(UNSPEAKABLE, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** アプリの言語コード（ja / zh-Hans …）→ 読み上げの BCP-47 タグ */
-const SPEECH_TAGS = {
-  ja: 'ja-JP',
-  en: 'en-US',
-  zh: 'zh-CN',
-  'zh-Hans': 'zh-CN',
-  'zh-Hant': 'zh-TW',
-  ko: 'ko-KR',
-  es: 'es-ES',
-  pt: 'pt-BR',
-  fr: 'fr-FR',
-  de: 'de-DE',
-  it: 'it-IT',
-  th: 'th-TH',
-  id: 'id-ID',
-  ar: 'ar-SA',
-};
-
-export function speechTag(language) {
-  const raw = String(language || '').trim();
-  if (!raw) return 'en-US';
-  if (SPEECH_TAGS[raw]) return SPEECH_TAGS[raw];
-  const base = raw.split(/[-_]/)[0].toLowerCase();
-  if (SPEECH_TAGS[base]) return SPEECH_TAGS[base];
-  if (raw.includes('-')) return raw;
-  return 'en-US';
-}
-
-/** iOS の AVSpeechSynthesizer（Capacitor プラグイン）。無い環境では false */
-function nativeSpeak(text, language) {
-  const cap = typeof window !== 'undefined' ? window.Capacitor : null;
-  const bridge = cap && cap.Plugins && cap.Plugins.ShootoutAudio;
-  if (!bridge || typeof bridge.speak !== 'function') return false;
-  try {
-    const answer = bridge.speak({ text, language: String(language || 'en') });
-    if (answer && typeof answer.catch === 'function') answer.catch(() => {});
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** ブラウザの speechSynthesis。声が1つも無い環境（ヘッドレス等）では使わない */
-function browserSpeak(text, tag) {
-  const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
-  if (!synth || typeof synth.speak !== 'function') return false;
-  try {
-    const voices = typeof synth.getVoices === 'function' ? synth.getVoices() : null;
-    if (!voices || !voices.length) return false;
-    if (typeof synth.cancel === 'function') synth.cancel();
-    const Utterance = typeof window.SpeechSynthesisUtterance === 'function' ? window.SpeechSynthesisUtterance : null;
-    if (!Utterance) return false;
-    const utterance = new Utterance(text);
-    utterance.lang = tag;
-    utterance.volume = 1;
-    utterance.rate = 1.02;
-    utterance.pitch = 1.06;
-    const lower = tag.toLowerCase();
-    const match = voices.find((voice) => String(voice.lang || '').toLowerCase() === lower)
-      || voices.find((voice) => String(voice.lang || '').toLowerCase().startsWith(lower.split('-')[0]));
-    if (match) utterance.voice = match;
-    synth.speak(utterance);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* カタカナ → 母音（フォルマント合成のフォールバック用） */
-const KANA_ROWS = [
-  ['アカサタナハマヤラワガザダバパァャヮ', 'a'],
-  ['イキシチニヒミリギジヂビピィ', 'i'],
-  ['ウクスツヌフムユルグズヅブプゥュヴ', 'u'],
-  ['エケセテネヘメレゲゼデベペェ', 'e'],
-  ['オコソトノホモヨロヲゴゾドボポォョ', 'o'],
-];
-const KANA_VOWEL = new Map();
-for (const [characters, vowel] of KANA_ROWS) {
-  for (const character of characters) KANA_VOWEL.set(character, vowel);
-}
-
-/** 言葉から母音を最大3つ拾う（取れなければ判定ごとの既定） */
-function vowelPattern(text, fallback) {  const vowels = [];
-  for (const character of String(text || '')) {
-    if (/[aeiou]/i.test(character)) vowels.push(character.toLowerCase());
-    else if (KANA_VOWEL.has(character)) vowels.push(KANA_VOWEL.get(character));
-    else if (character === 'ー') vowels.push(vowels[vowels.length - 1] || 'o');
-    if (vowels.length >= 3) break;
-  }
-  if (!vowels.length) return [...fallback];
-  while (vowels.length < 2) vowels.push(vowels[vowels.length - 1]);
-  return vowels;
-}
-
-/* 判定ごとの叫び方（高さ・長さ・音程の動き） */
-const VOICE_CONTOUR = {
-  goal: { from: 168, to: 286, gain: 0.085, durs: [0.15, 0.15, 0.36], fallback: ['o', 'o', 'u'] },
-  save: { from: 208, to: 156, gain: 0.075, durs: [0.13, 0.3], fallback: ['e', 'u'] },
-  miss: { from: 232, to: 138, gain: 0.07, durs: [0.14, 0.4], fallback: ['i', 'u'] },
-};
-
-/** 1音節ぶんの声（フォルマント2つ） */
-function syllable({ vowel, at, dur, gain, from, to }) {
+/** ブラスらしい1音（のこぎり波 → ローパスで開く → ビブラート） */
+function brass({ freq, delay = 0, dur = 0.5, gain = 0.05, vibrato = 5.2, bus: target = 'sfxBus' }) {
   const ctx = state.ctx;
-  if (!ctx) return;
+  if (!ctx || !ready()) return;
+  const out = state[target];
+  if (!out) return;
+  const start = ctx.currentTime + delay;
   const osc = ctx.createOscillator();
   osc.type = 'sawtooth';
-  osc.frequency.setValueAtTime(from, at);
-  osc.frequency.linearRampToValueAtTime(Math.max(60, to), at + dur);
-  const [f1, f2] = VOWEL_FORMANTS[vowel] || VOWEL_FORMANTS.o;
-  const band1 = ctx.createBiquadFilter();
-  band1.type = 'bandpass';
-  band1.frequency.value = f1;
-  band1.Q.value = 5;
-  const band2 = ctx.createBiquadFilter();
-  band2.type = 'bandpass';
-  band2.frequency.value = f2;
-  band2.Q.value = 7;
+  osc.frequency.setValueAtTime(freq, start);
+  /* ビブラート（人の息が通るブラスらしい揺れ） */
+  const lfo = ctx.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = vibrato;
+  const depth = ctx.createGain();
+  depth.gain.value = freq * 0.004;
+  lfo.connect(depth).connect(osc.frequency);
+  /* 立ち上がりでフィルターが開く（「パァン」と抜ける感じ） */
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.Q.value = 0.9;
+  filter.frequency.setValueAtTime(320, start);
+  filter.frequency.linearRampToValueAtTime(2600, start + Math.min(0.14, dur * 0.35));
   const amp = ctx.createGain();
-  amp.gain.setValueAtTime(0.0001, at);
-  amp.gain.linearRampToValueAtTime(gain, at + Math.min(0.035, dur * 0.35));
-  amp.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-  const mix = ctx.createGain();
-  mix.gain.value = 0.9;
-  osc.connect(band1).connect(mix);
-  osc.connect(band2).connect(mix);
-  mix.connect(amp).connect(state.sfxBus);
-  osc.start(at);
-  osc.stop(at + dur + 0.02);
-  /* 子音の立ち上がり（言葉として聞き取りやすくする） */
-  noise({ dur: 0.028, gain: gain * 0.55, low: 500, high: 2600, delay: Math.max(0, at - ctx.currentTime) });
-}
-
-/** 検証用: どの発声経路が使えるか（native = iOS の AVSpeechSynthesizer） */
-export function audioSupport() {
-  const cap = typeof window !== 'undefined' ? window.Capacitor : null;
-  const bridge = cap && cap.Plugins && cap.Plugins.ShootoutAudio;
-  let browser = false;
-  try {
-    const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
-    const voices = synth && typeof synth.getVoices === 'function' ? synth.getVoices() : null;
-    browser = Boolean(synth && typeof synth.speak === 'function' && voices && voices.length);
-  } catch {
-    browser = false;
-  }
-  return { native: Boolean(bridge && typeof bridge.speak === 'function'), browser };
-}
-
-/** テスト用: 言葉から拾う母音（12言語の単語が声になるか） */
-export function voiceVowels(text, fallback = ['o', 'o', 'u']) {
-  return vowelPattern(text, fallback);
+  amp.gain.setValueAtTime(0.0001, start);
+  amp.gain.linearRampToValueAtTime(gain, start + Math.min(0.05, dur * 0.2));
+  amp.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  osc.connect(filter).connect(amp).connect(out);
+  osc.start(start);
+  lfo.start(start);
+  osc.stop(start + dur + 0.02);
+  lfo.stop(start + dur + 0.02);
 }
 
 /**
- * 判定のボイス。kind = 'goal' | 'save' | 'miss'、text は表示中の言語の単語。
- * 1. iOS ネイティブ（AVSpeechSynthesizer）→ 2. ブラウザの speechSynthesis
- * → 3. フォルマント合成 の順で、必ずどれかで鳴らす。
- * 鳴らしたら { kind, vowels, spoken } を返す（音OFFなら null）。
+ * スタジアムホーン: 低音の厚みのあるブラス和音。
+ * F2・A2・C3・F3 の明るく力強い和音に、1オクターブ下を重ねて「ズン」と響かせる。
  */
-export function voice(kind, { text = '', language = '' } = {}) {
+export function stadiumHorn({ delay = 0, dur = 1.5, gain = 0.075 } = {}) {
+  if (!state.settings.sound) return;
+  for (const [freq, level] of [[43.65, 0.9], [87.31, 1], [116.54, 0.72], [174.61, 0.85], [349.23, 0.4]]) {
+    brass({ freq, delay, dur, gain: gain * level, vibrato: 4.6 });
+  }
+  /* ホーンの息づかい（空気が抜けるノイズ） */
+  noise({ dur: 0.34, gain: 0.06, low: 260, high: 2800, delay, bus: 'sfxBus' });
+  vibrate([30, 30, 70]);
+}
+
+/**
+ * 勝利のファンファーレ: 上昇するブラスのアルペジオ → 最後に高い和音を伸ばす。
+ * 「ゴーーーーーール‼️」の達成感を、音程の上昇と余韻で作る。
+ */
+export function victoryFanfare({ delay = 0.3, gain = 0.045 } = {}) {
+  if (!state.settings.sound) return;
+  const notes = [[349.23, 0], [440, 0.14], [523.25, 0.28], [698.46, 0.44], [880, 0.66]];
+  for (const [freq, step] of notes) {
+    brass({ freq, delay: delay + step, dur: 0.44, gain, vibrato: 5.8 });
+    brass({ freq: freq / 2, delay: delay + step, dur: 0.42, gain: gain * 0.45, vibrato: 5.2 });
+  }
+  /* 最後の和音（F メジャー）を重ねて1秒伸ばす */
+  for (const [freq, level] of [[523.25, 0.8], [659.25, 0.6], [783.99, 0.6], [1046.5, 0.5]]) {
+    brass({ freq, delay: delay + 0.86, dur: 1.1, gain: gain * level, vibrato: 5.4 });
+  }
+  /* きらめき（ファンファーレの余韻） */
+  [1567.98, 2093, 2637.02].forEach((freq, index) => {
+    tone({ freq, end: freq, dur: 0.5, gain: 0.018, type: 'triangle', delay: delay + 0.9 + index * 0.07, bus: 'sfxBus' });
+  });
+}
+
+/** 観客の「オオオッ！」: 上がっていくどよめき（セーブ・好プレー） */
+export function crowdOoh({ amount = 1 } = {}) {
+  if (!state.settings.sound) return;
+  const strength = Math.max(0.3, Math.min(1.6, amount));
+  noise({ dur: 0.8, gain: 0.24 * strength, low: 300, high: 2600, q: 0.7, bus: 'crowdBus' });
+  /* 「オ」の共鳴が上へ跳ねる（驚き → 称賛） */
+  tone({ freq: 208, end: 330, dur: 0.44, gain: 0.055 * strength, type: 'sawtooth', bus: 'crowdBus' });
+  tone({ freq: 312, end: 494, dur: 0.38, gain: 0.028 * strength, type: 'sawtooth', bus: 'crowdBus', delay: 0.06 });
+  crowdSurge(0.9 * strength);
+  vibrate(35);
+}
+
+/** 観客の「アァ〜…」: 下がっていく落胆＋ため息（ミスキック） */
+export function crowdAww({ amount = 1 } = {}) {
+  if (!state.settings.sound) return;
+  const strength = Math.max(0.3, Math.min(1.6, amount));
+  noise({ dur: 0.95, gain: 0.22 * strength, low: 180, high: 1900, q: 0.6, bus: 'crowdBus' });
+  tone({ freq: 300, end: 148, dur: 0.82, gain: 0.05 * strength, type: 'sawtooth', bus: 'crowdBus' });
+  tone({ freq: 204, end: 96, dur: 0.72, gain: 0.038 * strength, type: 'sine', bus: 'crowdBus', delay: 0.08 });
+  /* ため息（息が抜けるノイズ） */
+  noise({ dur: 0.6, gain: 0.085 * strength, low: 500, high: 3200, q: 0.5, delay: 0.2, bus: 'crowdBus' });
+  vibrate([18, 45]);
+}
+
+/** 力強いグローブストップ＆クリア音（セーブの瞬間の「バシッ」＋抜け） */
+export function gloveClear() {
+  if (!state.settings.sound) return;
+  noise({ dur: 0.13, gain: 0.15, low: 220, high: 3400, q: 1.1 });
+  tone({ freq: 240, end: 72, dur: 0.16, gain: 0.1, type: 'square' });
+  noise({ dur: 0.36, gain: 0.06, low: 1400, high: 6800, q: 0.4, delay: 0.1 });
+}
+
+/** 判定ごとの演出音の組み合わせ */
+const SHOWCASE = {
+  goal: () => { stadiumHorn(); victoryFanfare(); },
+  save: () => { gloveClear(); crowdOoh(); },
+  miss: () => { crowdAww(); },
+};
+
+/**
+ * 判定の演出音。kind = 'goal' | 'save' | 'miss'。
+ * 棒読みの読み上げは行わない（Build 6 で廃止）。音OFFなら null。
+ * 鳴らしたら { kind, mode: 'showcase' } を返し、state に記録する。
+ */
+export function voice(kind) {
   if (!state.settings.sound) return null;
-  const contour = VOICE_CONTOUR[kind];
-  if (!contour) return null;
-  /* 絵文字・記号は読み上げさせない（「ゴール！」→「ゴール」） */
-  const clean = speakableText(text);
-  const vowels = vowelPattern(clean || text, contour.fallback);
-
-  /* 1. iOS のネイティブ発声。鳴らせたらフォルマントは重ねない（二重の声になる） */
-  let spoken = 'none';
-  if (clean && nativeSpeak(clean, language)) {
-    spoken = 'native';
-    state.speech.native += 1;
-  } else if (clean && browserSpeak(clean, speechTag(language))) {
-    /* 2. ブラウザの音声合成。聞こえ方を補うため、小さめのフォルマントを重ねる */
-    spoken = 'browser';
-    state.speech.browser += 1;
-  }
-
-  /* 3. フォルマント合成（ネイティブのときは鳴らさない） */
-  if (spoken !== 'native' && state.ctx) {
-    const scale = spoken === 'browser' ? 0.45 : 1;
-    const start = state.ctx.currentTime + 0.16;
-    let cursor = start;
-    vowels.forEach((vowel, index) => {
-      const dur = contour.durs[Math.min(index, contour.durs.length - 1)];
-      const span = (contour.to - contour.from) / Math.max(1, vowels.length);
-      syllable({
-        vowel,
-        at: cursor,
-        dur,
-        gain: contour.gain * scale * (index === vowels.length - 1 ? 1 : 0.86),
-        from: contour.from + span * index,
-        to: contour.from + span * (index + 1),
-      });
-      cursor += dur * 0.92;
-    });
-    if (spoken === 'none') {
-      spoken = 'formant';
-      state.speech.formant += 1;
-    }
-  }
-  if (spoken === 'none') state.speech.silent += 1;
-
+  const play = SHOWCASE[kind];
+  if (!play) return null;
+  play();
   state.voices[kind] = (state.voices[kind] || 0) + 1;
-  state.lastVoice = {
-    kind,
-    vowels: vowels.join(''),
-    language: String(language || ''),
-    text: clean,
-    spoken,
-    at: Date.now(),
-  };
-  return { kind, vowels, spoken };
+  state.lastVoice = { kind, mode: 'showcase', at: Date.now() };
+  return { kind, mode: 'showcase' };
 }
 
 /* ------------------------------------------------------------------ *\
@@ -704,6 +581,7 @@ export function testSound() {
   setTimeout(() => netSound(), 220);
   setTimeout(() => goalRoar(1.6), 300);
   setTimeout(() => crowdSurge(1), 320);
+  setTimeout(() => voice('goal'), 340);
   setTimeout(() => configureAudio(before), 2600);
   return ok;
 }
@@ -771,44 +649,61 @@ function activateBridge() {
 
 /**
  * タップ・クリック・キー入力のたびに呼ぶ安全策。
- * AudioContext が suspend のままなら resume する（戻ってきて最初の操作で音が戻る）。
- */
-/**
- * タップ・クリック・キー入力のたびに呼ぶ安全策。
- * Build 5: iOS の WKWebView は、復帰後や割り込み（interrupted）の後に
- * `ctx.state` が 'running' に見えても音が出ないことがある。なので:
- *   ！ 状態が running 以外（suspended / interrupted）→ resume + ブリッジ + 無音1サンプル + 下支え
- *   ！ バックグラウンドから戻った直後の最初の操作 → running に見えても1回だけ同じことを強制する
- *   ！ ctx が closed → AudioContext を作り直してバスを張り直す
+ *
+ * Build 6: iOS の WKWebView では、バックグラウンドで AVAudioSession を手放して
+ * `ctx.suspend()` した後、古い AudioContext に `resume()` を呼んでも OS の
+ * オーディオ出力と再接続されず無音のままになることがある（`ctx.state` は
+ * 'running' に見えても音が出ない）。そこで、復帰後の最初のユーザー操作（この関数が
+ * 呼ばれるタイミング＝本物のタップ）で、古い Context を `close()` して捨て、
+ * `createContext()` で新しく作り直し、バス・BGM・歓声を張り直す。
+ *   ！ 復帰直後（needsGestureRecovery）／closed → Context を作り直す（戻り値 true）
+ *   ！ suspended / interrupted → resume + ブリッジ + 無音1サンプル + 下支え
+ *   ！ running → 下支えだけ確かめる（戻り値 false）
+ * 戻り値 true は「作り直した」＝呼び出し側で歓声を張り直す合図。
  */
 export function ensureAudioRunning() {
   if (!state.ctx) return false;
-  /* closed を生き返らせることはできない。新しい Context を作る */
-  if (state.ctx.state === 'closed') {
-    stopCrowd();
-    stopMusic();
-    if (!createContext()) return false;
-    state.needsGestureRecovery = true;
-  }
-  const force = state.needsGestureRecovery;
-  state.needsGestureRecovery = false;
-  const ctx = state.ctx;
-  if (!force && ctx.state === 'running') {
-    ensureSilentAudio();
-    return true;
-  }
-  if (ctx.state !== 'running') {
+  const force = state.needsGestureRecovery || state.ctx.state === 'closed';
+  if (!force) {
+    if (state.ctx.state === 'running') {
+      ensureSilentAudio();
+      return false;
+    }
     try {
-      ctx.resume().catch(() => {});
+      state.ctx.resume().catch(() => {});
     } catch {
       /* closed でもゲームは続ける */
     }
+    activateBridge();
+    silentPoke();
+    ensureSilentAudio();
+    state.recoveries += 1;
+    return false;
   }
+  /* 復帰後・closed: 古い Context は捨てて、新しいものを作る */
+  stopCrowd();
+  stopMusic();
+  try {
+    state.ctx.close();
+  } catch {
+    /* すでに閉じていても続ける */
+  }
+  state.ctx = null;
+  if (!createContext()) {
+    state.needsGestureRecovery = true;
+    return false;
+  }
+  state.needsGestureRecovery = false;
+  /* createContext() がバスと音量を作り直す。念のため当て直す */
+  applyVolumes();
   activateBridge();
   silentPoke();
   ensureSilentAudio();
-  /* 復帰の1回だけ、BGMも鳴っていなければ起こし直す（歓声は呼び出し側の判断） */
-  if (force && state.settings.bgm) startMusic();
+  /* BGM はタイマーごと張り直す（古いタイマーは古い Context を指している） */
+  if (state.settings.bgm) {
+    stopMusic();
+    startMusic();
+  }
   state.recoveries += 1;
   return true;
 }
@@ -824,6 +719,8 @@ export function suspendForBackground() {
   } catch {
     /* 下支えが無くても止められる */
   }
+  /* Build 6: pause() した古い <audio> を再利用せず捨てる */
+  state.silent = null;
   const ctx = state.ctx;
   if (ctx && ctx.state === 'running') ctx.suspend().catch(() => {});
   /* iOS: アプリ側の Audio Session も手放す（Dynamic Island のスピーカー印対策） */
@@ -884,7 +781,6 @@ export function audioState() {
     backgrounded: Boolean(state.backgrounded),
     voice: state.lastVoice ? { ...state.lastVoice } : null,
     voices: { ...state.voices },
-    speech: { ...state.speech },
     needsGestureRecovery: Boolean(state.needsGestureRecovery),
     silent: Boolean(state.silent),
     recoveries: state.recoveries,

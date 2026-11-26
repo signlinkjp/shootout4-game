@@ -16,7 +16,7 @@ import { rankView } from '../src/ui/online.js';
 import { rankTable, emptyStanding, addStandingResult } from '../src/core/ranking.js';
 import { DEFAULT_SKIN } from '../src/core/skins.js';
 import { EMPTY_RECORD, EMPTY_SHOTS, addShotDirection } from '../src/storage.js';
-import { voiceVowels } from '../src/audio.js';
+import { voice, configureAudio } from '../src/audio.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (path) => readFileSync(resolve(ROOT, path), 'utf8');
@@ -62,28 +62,31 @@ test('2. 蹴り始めに相手の方向を出さない（着弾で出す）順�
   assert.match(body, /match\.roundId !== roundId/);
 });
 
-test('3. ゴール！/セーブ！/ミス！のボイスが着弾で鳴り、12言語の単語から母音を取る', () => {
+test('3. ゴール/セーブ/ミスの演出音が着弾で鳴り、棒読みの読み上げは使わない', () => {
   const main = read('src/main.js');
-  assert.match(main, /voice\(bannerKind/);
-  assert.match(main, /t\('voiceMiss'\)/);
+  assert.match(main, /voice\(bannerKind\)/);
+  assert.equal(/saveGroan/.test(main), false, 'ミスの唸り（棒読みの代わりの声）は使わない');
   const audio = read('src/audio.js');
   assert.match(audio, /export function voice\(kind/);
-  assert.match(audio, /bandpass/);
-  assert.match(audio, /VOWEL_FORMANTS/);
+  /* 音声合成は一切使わない（Build 6 で廃止） */
+  assert.equal(/AVSpeechSynthesizer|speechSynthesis|SpeechSynthesisUtterance|VOWEL_FORMANTS|speakableText/.test(audio), false, '棒読みの読み上げは残さない');
+  /* 代わりの演出音: スタジアムホーン＋勝利のファンファーレ／どよめき／落胆 */
+  assert.match(audio, /export function stadiumHorn/);
+  assert.match(audio, /export function victoryFanfare/);
+  assert.match(audio, /export function crowdOoh/);
+  assert.match(audio, /export function crowdAww/);
+  assert.match(audio, /export function gloveClear/);
   assert.match(audio, /state\.settings\.sound/, '音OFFでは鳴らさない');
 
-  /* 日本語の「ゴール」→ o,o,u / 「セーブ」→ e,e,u / 「ミス」→ i,u */
-  assert.deepEqual(voiceVowels('ゴール！'), ['o', 'o', 'u']);
-  assert.deepEqual(voiceVowels('セーブ！'), ['e', 'e', 'u']);
-  assert.deepEqual(voiceVowels('ミス'), ['i', 'u']);
-  /* 12言語すべてで、声の母音が取れる（取れなければ既定に落ちる） */
-  for (const language of LANGUAGES) {
-    for (const key of ['goal', 'save', 'voiceMiss']) {
-      const vowels = voiceVowels(tr(language, key), ['o', 'o', 'u']);
-      assert.ok(Array.isArray(vowels) && vowels.length >= 2, `${language}.${key}`);
-      assert.ok(vowels.every((vowel) => /^[aiouen]$/.test(vowel)), `${language}.${key}: ${vowels.join('')}`);
-    }
-  }
+  /* AudioContext が無い環境でも、鳴らした判定は記録して返す */
+  configureAudio({ sound: true });
+  assert.deepEqual(voice('goal'), { kind: 'goal', mode: 'showcase' });
+  assert.equal(voice('save').kind, 'save');
+  assert.equal(voice('miss').kind, 'miss');
+  assert.equal(voice('nope'), null);
+  configureAudio({ sound: false });
+  assert.equal(voice('goal'), null, '音OFFでは鳴らさない');
+  configureAudio({ sound: true });
 });
 
 test('4. 利き足の蹴り分け: 右はボールの左から右足、左はボールの右から左足', () => {

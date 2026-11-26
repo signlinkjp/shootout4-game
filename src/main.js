@@ -32,7 +32,7 @@ import {
 } from './storage.js';
 import {
   unlockAudio, configureAudio, click, select as selectSound, whistle, kickSound, netSound,
-  gloveSound, goalRoar, saveGroan, countdownTick, startCrowd, stopCrowd, crowdSurge,
+  gloveSound, goalRoar, countdownTick, startCrowd, stopCrowd, crowdSurge,
   openingCrowd, audioState, uiSwitch, purchaseChime, testSound, voice, ensureAudioRunning,
   suspendForBackground, resumeFromBackground,
 } from './audio.js';
@@ -701,11 +701,11 @@ function applyKick(shot, save, { timeout = false, stuck = false } = {}) {
 
   if (timeout) setKickStatus(t(event.miss ? 'timeoutMiss' : event.stuck ? 'timeoutStuck' : 'timeoutMiss'));
 
-  /* 判定のボイス（ゴール！/ セーブ！/ ミスキック！）は着弾に合わせて鳴らす。
-     絵文字（goal / save / missKick の表示文に入っている）は audio.js 側で落として読ませる。 */
+  /* 判定の演出音（ゴール/セーブ/ミス）は着弾に合わせて鳴らす。
+     Build 6: 棒読みの読み上げは廃止し、スタジアムホーン＋ファンファーレ／
+     観客のどよめき／落胆のため息で盛り上げる（audio.js の voice）。 */
   const announce = () => {
-    const text = bannerKind === 'miss' ? t('voiceMiss') : t(bannerKind === 'goal' ? 'goal' : 'save');
-    voice(bannerKind, { text, language: prefs.language });
+    voice(bannerKind);
   };
 
   let animation = null;
@@ -721,8 +721,10 @@ function applyKick(shot, save, { timeout = false, stuck = false } = {}) {
       onImpact: (kind) => {
         if (kind === 'kick') kickSound();
         if (kind === 'goal') { netSound(); goalRoar(2.4); crowdSurge(1.1); }
-        if (kind === 'save') { gloveSound(); saveGroan(); }
-        if (kind === 'miss') { gloveSound(); saveGroan(); }
+        /* セーブは gloveSound（グローブの当たり）＋ voice('save')（どよめきとクリア音） */
+        if (kind === 'save') { gloveSound(); }
+        /* ミスキックはボールが枠外へ流れる音＋ voice('miss')（観客の落胆） */
+        if (kind === 'miss') { netSound(); }
         if (kind === 'goal' || kind === 'save' || kind === 'miss') {
           announce();
           reveal();
@@ -733,7 +735,8 @@ function applyKick(shot, save, { timeout = false, stuck = false } = {}) {
     kickSound();
     setTimeout(() => {
       if (event.goal) { netSound(); goalRoar(2.2); }
-      else { gloveSound(); saveGroan(); }
+      else if (event.miss) netSound();
+      else gloveSound();
       announce();
       reveal();
     }, 300);
@@ -1402,8 +1405,13 @@ function onAppVisible() {
   appHidden = false;
   resumeFromBackground({ crowd: screen === 'match' && Boolean(match) && !match.confirmed });
   if (prefs.sound || prefs.bgm) configureAudio(prefs);
-  /* Build 4: 戻った直後に AudioContext が suspended のままでも、次の操作で必ず起こす */
-  if (prefs.sound || prefs.bgm) ensureAudioRunning();
+  /*
+   * Build 6: ここで ensureAudioRunning() を呼ばない。onAppVisible() は
+   * visibilitychange / focus（ユーザージェスチャーではない）から発火するので、
+   * needsGestureRecovery をここで消費してしまうと、戻って最初のタップで
+   * AudioContext を作り直せず、BGM が鳴らないままになる。
+   * 音の起こし直しは pointerdown / touchstart / keydown（本物の操作）でだけ行う。
+   */
   resumeRound();
   document.documentElement.dataset.background = 'false';
   return true;
@@ -1808,7 +1816,11 @@ window.addEventListener('focus', () => { if (!document.hidden) onAppVisible(); }
 ['pointerdown', 'touchstart', 'keydown'].forEach((type) => {
   document.addEventListener(type, () => {
     if (!prefs.sound && !prefs.bgm) return;
-    ensureAudioRunning();
+    /* Build 6: 復帰後の最初の操作で AudioContext を作り直したら、試合中の歓声も張り直す */
+    const rebuilt = ensureAudioRunning();
+    if (rebuilt && prefs.sound && screen === 'match' && match && !match.confirmed) {
+      startCrowd(getCountry(prefs.country));
+    }
   }, { capture: true, passive: true });
 });
 
@@ -1911,10 +1923,8 @@ window.__SHOOTOUT__ = {
   refreshRank: () => { refreshRank(); return rankRows.length; },
   shareText: () => (match ? buildShareText({ t, state: match.state, prefs, language: prefs.language }) : ''),
   share: () => shareResult(),
-  voice: (kind, text, language) => voice(kind || 'goal', {
-    text: text == null ? t(kind === 'miss' ? 'voiceMiss' : (kind === 'save' ? 'save' : 'goal')) : text,
-    language: language || prefs.language,
-  }),
+  /* Build 6: 判定の演出音（音声の読み上げはなし）。返り値は { kind, mode: 'showcase' } */
+  voice: (kind) => voice(kind || 'goal'),
   ensureAudio: () => ensureAudioRunning(),
   get preview() { return lockerPreview ? lockerPreview.snapshot() : { available: false }; },
   appHidden: (value) => (value ? onAppHidden() : onAppVisible()),

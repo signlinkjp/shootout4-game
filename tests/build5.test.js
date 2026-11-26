@@ -11,7 +11,7 @@ import { newMatch } from '../src/core/rules.js';
 import { matchView } from '../src/ui/match.js';
 import { rulesView } from '../src/ui/misc.js';
 import {
-  speakableText, speechTag, voice, voiceVowels, audioState, audioSupport, configureAudio,
+  voice, audioState, configureAudio,
 } from '../src/audio.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,7 +20,7 @@ const tJa = (key, vars) => tr('ja', key, vars);
 const prefs = { country: 'JP', opponent: 'BR', sound: true, bgm: true, vibrate: true, order: 'first', language: 'ja' };
 const lower = (value) => String(value).toLowerCase();
 
-/** window を差し替えて実行する（audio.js は呼び出し時に window を見る） */
+/** window を差し替えて実行する（不要になったが、将来の検証用に残す） */
 function withWindow(fake, run) {
   const had = Object.prototype.hasOwnProperty.call(globalThis, 'window');
   const before = globalThis.window;
@@ -97,126 +97,56 @@ test('1c. 助走は右利き＝ボールの左（-X）から右足、左利き�
  * 2. ボイス（人の声）
  * ------------------------------------------------------------------ */
 
-test('2. 判定の言葉は絵文字・記号を落として読み上げる（12言語）', () => {
-  assert.equal(speakableText('ゴール！'), 'ゴール');
-  assert.equal(speakableText('セーブ！'), 'セーブ');
-  assert.equal(speakableText('ミスキック！'), 'ミスキック');
-  assert.equal(speakableText('MISS KICK 😭💦'), 'MISS KICK');
-  assert.equal(speakableText('¡GOL!'), 'GOL');
-  for (const language of LANGUAGES) {
-    for (const key of ['goal', 'save', 'voiceMiss', 'missKick']) {
-      const clean = speakableText(tr(language, key));
-      assert.ok(clean.length > 0, `${language}.${key} が空`);
-      assert.equal(/[\p{Extended_Pictographic}\p{So}]/u.test(clean), false, `${language}.${key} に絵文字: ${clean}`);
-      assert.equal(/[!！]/.test(clean), false, `${language}.${key} に感嘆符: ${clean}`);
-      assert.ok(voiceVowels(clean).length >= 2, `${language}.${key} の母音`);
-    }
-  }
+/* ------------------------------------------------------------------ *\
+ * 2. 演出音（Build 6: 棒読みの読み上げを廃止し、音だけで盛り上げる）
+ * ------------------------------------------------------------------ */
+
+test('2. 判定は音の演出だけで盛り上げる（音声合成なし・ゴール/セーブ/ミスで別の音）', () => {
+  const audio = read('src/audio.js');
+  /* 棒読みの読み上げは一切残さない */
+  assert.equal(/AVSpeechSynthesizer|AVSpeechUtterance|speechSynthesis|SpeechSynthesisUtterance/.test(audio), false, '音声合成を呼ばない');
+  assert.equal(/nativeSpeak|browserSpeak|speakableText|speechTag|voiceVowels|VOWEL_FORMANTS/.test(audio), false, '読み上げ用の補助も残さない');
+  /* 判定ごとの演出音 */
+  assert.match(audio, /export function stadiumHorn/, 'ゴール: スタジアムホーン');
+  assert.match(audio, /export function victoryFanfare/, 'ゴール: 勝利のファンファーレ');
+  assert.match(audio, /export function crowdOoh/, 'セーブ: 観客のどよめき');
+  assert.match(audio, /export function gloveClear/, 'セーブ: グローブストップ＆クリア');
+  assert.match(audio, /export function crowdAww/, 'ミス: 観客の落胆');
+  assert.match(audio, /goal: \(\) => \{ stadiumHorn\(\); victoryFanfare\(\); \}/);
+  assert.match(audio, /save: \(\) => \{ gloveClear\(\); crowdOoh\(\); \}/);
+  assert.match(audio, /miss: \(\) => \{ crowdAww\(\); \}/);
+  /* ゴールは既存の goalRoar() / crowdSurge() に重ねる（main.js 側） */
+  assert.match(read('src/main.js'), /goalRoar\(2\.4\); crowdSurge\(1\.1\)/);
+
+  /* AudioContext が無くても記録し、音OFFでは鳴らさない */
+  configureAudio({ sound: true });
+  assert.deepEqual(voice('goal'), { kind: 'goal', mode: 'showcase' });
+  assert.deepEqual(voice('save'), { kind: 'save', mode: 'showcase' });
+  assert.deepEqual(voice('miss'), { kind: 'miss', mode: 'showcase' });
+  const state = audioState();
+  assert.ok(state.voices.goal >= 1 && state.voices.save >= 1 && state.voices.miss >= 1);
+  assert.equal(state.voice.mode, 'showcase');
+  configureAudio({ sound: false });
+  assert.equal(voice('goal'), null, '音OFFでは鳴らさない');
+  configureAudio({ sound: true });
 });
 
-test('2b. 言語コードは BCP-47 へ変換する（12言語＋予備）', () => {
-  const expected = {
-    ja: 'ja-JP', en: 'en-US', 'zh-Hans': 'zh-CN', 'zh-Hant': 'zh-TW', ko: 'ko-KR', es: 'es-ES',
-    pt: 'pt-BR', fr: 'fr-FR', de: 'de-DE', it: 'it-IT', th: 'th-TH', id: 'id-ID',
-  };
-  for (const language of LANGUAGES) {
-    assert.equal(speechTag(language), expected[language], language);
-  }
-  assert.equal(speechTag('ar'), 'ar-SA');
-  assert.equal(speechTag(''), 'en-US');
-  assert.equal(speechTag('vi'), 'en-US');
-});
-
-test('2c. iOS はネイティブ発声（ShootoutAudio.speak）を最優先し、記録を残す', () => {
-  const calls = [];
-  const fake = {
-    Capacitor: {
-      Plugins: {
-        ShootoutAudio: {
-          speak: (args) => { calls.push(args); return Promise.resolve({ spoken: true }); },
-        },
-      },
-    },
-  };
-  withWindow(fake, () => {
-    configureAudio({ sound: true });
-    const before = audioState().voices.goal || 0;
-    const result = voice('goal', { text: tr('ja', 'goal'), language: 'ja' });
-    assert.equal(result.spoken, 'native');
-    assert.equal(calls.length, 1, 'ブリッジを1回だけ呼ぶ');
-    assert.deepEqual(calls[0], { text: 'ゴール', language: 'ja' }, '絵文字を除いた言葉と言語コード');
-    const state = audioState();
-    assert.equal(state.voices.goal, before + 1);
-    assert.equal(state.voice.kind, 'goal');
-    assert.equal(state.voice.spoken, 'native');
-    assert.equal(state.voice.text, 'ゴール');
-    assert.equal(state.voice.language, 'ja');
-    assert.equal(state.voice.vowels, 'oou');
-    assert.ok(audioSupport().native === true);
-
-    /* 音OFFでは鳴らさない（ブリッジも呼ばない） */
-    configureAudio({ sound: false });
-    assert.equal(voice('save', { text: tr('ja', 'save'), language: 'ja' }), null);
-    assert.equal(calls.length, 1, '音OFFではネイティブも呼ばない');
-    configureAudio({ sound: true });
-  });
-});
-
-test('2d. ブラウザは speechSynthesis（声があるとき）で読み上げる', () => {
-  const spoken = [];
-  const fake = {
-    speechSynthesis: {
-      getVoices: () => [{ lang: 'ja-JP', name: 'Kyoko' }],
-      cancel: () => {},
-      speak: (utterance) => spoken.push({ text: utterance.text, lang: utterance.lang }),
-    },
-    SpeechSynthesisUtterance: class {
-      constructor(text) { this.text = text; }
-    },
-  };
-  withWindow(fake, () => {
-    configureAudio({ sound: true });
-    const result = voice('save', { text: tr('ja', 'save'), language: 'ja' });
-    assert.equal(result.spoken, 'browser');
-    assert.deepEqual(spoken[0], { text: 'セーブ', lang: 'ja-JP' });
-    assert.equal(audioState().voice.spoken, 'browser');
-  });
-});
-
-test('2e. 声が無い環境でも記録は残し、フォルマント合成へ落ちる', () => {
-  withWindow(null, () => {
-    configureAudio({ sound: true });
-    const result = voice('miss', { text: tr('ja', 'voiceMiss'), language: 'ja' });
-    assert.ok(result);
-    assert.equal(result.spoken, 'none', 'AudioContext が無いので合成もできない');
-    const state = audioState();
-    assert.equal(state.voice.kind, 'miss');
-    assert.equal(state.voice.text, 'ミスキック');
-    assert.equal(state.voice.spoken, 'none');
-    assert.match(read('src/audio.js'), /bandpass/, 'フォルマント合成は残す（最終フォールバック）');
-  });
-});
-
-test('2f. iOS 側に AVSpeechSynthesizer の発声があり、プラグインに登録されている', () => {
+test('2b. iOS 側に音声合成（AVSpeechSynthesizer / speak）が残っていない', () => {
   const swift = read('ios/App/App/AppDelegate.swift');
+  assert.equal(/AVSpeechSynthesizer|AVSpeechUtterance|func speak\(/.test(swift), false, '読み上げを外した');
+  assert.equal(/CAPPluginMethod\(name: "speak"/.test(swift), false, 'speak を登録しない');
+  assert.match(swift, /CAPPluginMethod\(name: "activate"/);
+  assert.match(swift, /CAPPluginMethod\(name: "deactivate"/);
+  /* 音そのものは AVAudioSession の activate / deactivate だけで支える */
   assert.match(swift, /import AVFoundation/);
-  assert.match(swift, /static let synthesizer = AVSpeechSynthesizer\(\)/, 'ARC で消えないようクラス保持');
-  assert.match(swift, /@objc public func speak\(_ call: CAPPluginCall\)/);
-  assert.match(swift, /CAPPluginMethod\(name: "speak", returnType: CAPPluginReturnPromise\)/);
-  assert.match(swift, /stopSpeaking\(at: \.immediate\)/, '前の声を止める');
   assert.match(swift, /AVAudioSession[\s\S]*?setCategory\(\.playback, mode: \.default, options: \[\.mixWithOthers\]\)/);
   assert.match(swift, /setActive\(true\)/);
-  assert.match(swift, /utterance\.volume = 1\.0/);
-  assert.match(swift, /"ja": "ja-JP"[\s\S]*?"th": "th-TH"/, 'BCP-47 の変換表');
-  /* Web 側は Capacitor があるときだけネイティブへ渡す */
-  const audio = read('src/audio.js');
-  assert.match(audio, /window\?\.Capacitor|typeof window !== 'undefined' \? window\.Capacitor/);
-  assert.match(audio, /Plugins\.ShootoutAudio/);
-  assert.match(audio, /speak: \(args\)|bridge\.speak\(\{ text, language/);
+  assert.match(read('src/audio.js'), /Plugins\.ShootoutAudio/);
+  assert.match(read('src/audio.js'), /bridge\.activate\(\)/);
 });
 
 /* ------------------------------------------------------------------ *\
- * 3. 音が消えない（Build 5）
+ * 3. 音が消えない（Build 5 / Build 6）
  * ------------------------------------------------------------------ */
 
 test('3. 通知・共有シート・課金シート（blur）では音を止めない', () => {
@@ -230,18 +160,26 @@ test('3. 通知・共有シート・課金シート（blur）では音を止め�
   assert.match(swift, /func applicationDidEnterBackground/);
 });
 
-test('3b. 復帰後は state が running に見えても1回は必ず起こし直す', () => {
+test('3b. 復帰後の最初の操作で AudioContext を作り直す（onAppVisible では消費しない）', () => {
   const audio = read('src/audio.js');
   assert.match(audio, /needsGestureRecovery/);
-  assert.match(audio, /if \(state\.ctx\.state === 'closed'\)[\s\S]*?createContext\(\)/, 'closed は作り直す');
-  assert.match(audio, /if \(!force && ctx\.state === 'running'\)[\s\S]*?return true;/, '復帰直後は running でも強制');
+  assert.match(audio, /const force = state\.needsGestureRecovery \|\| state\.ctx\.state === 'closed'/);
+  assert.match(audio, /state\.ctx\.close\(\)[\s\S]*?createContext\(\)/, '古い Context を捨てて作り直す');
+  assert.match(audio, /if \(state\.settings\.bgm\) \{[\s\S]*?stopMusic\(\);\s*startMusic\(\);/, '作り直した Context で BGM を張り直す');
   assert.match(audio, /function silentPoke\(\)/, '無音1サンプル');
   assert.match(audio, /function applyVolumes\(\)/, '新しいバスに設定を当て直す');
   assert.match(audio, /export function ensureAudioRunning/);
   assert.match(audio, /export function resumeFromBackground/);
+  /* suspend では古い無音 <audio> を捨てる */
+  assert.match(audio, /state\.silent\?\.pause\?\.\(\)[\s\S]*?state\.silent = null/);
   const main = read('src/main.js');
   assert.match(main, /\['pointerdown', 'touchstart', 'keydown'\]/);
-  assert.match(main, /ensureAudioRunning\(\)/);
+  assert.match(main, /const rebuilt = ensureAudioRunning\(\)/);
+  assert.match(main, /if \(rebuilt && prefs\.sound && screen === 'match' && match && !match\.confirmed\) \{[\s\S]*?startCrowd\(getCountry\(prefs\.country\)\)/, '試合中の歓声も張り直す');
+  /* onAppVisible（visibilitychange / focus）では needsGestureRecovery を空消費しない */
+  const start = main.indexOf('function onAppVisible()');
+  const visible = main.slice(start, main.indexOf('\n}\n', start) + 3);
+  assert.equal(/ensureAudioRunning\(\);/.test(visible), false, 'onAppVisible では呼ばない');
 });
 
 /* ------------------------------------------------------------------ *\
@@ -297,8 +235,8 @@ test('4c. キーパーの選択は「画面で押した位置」と一致する�
  * 5. ビルド番号
  * ------------------------------------------------------------------ */
 
-test('5. Build 5 / v1.0.0 で揃っている', () => {
+test('5. Build 6 / v1.0.0 で揃っている', () => {
   assert.equal(CONFIG.version, '1.0.0');
-  assert.equal(CONFIG.build, 5);
-  assert.equal((read('ios/App/App.xcodeproj/project.pbxproj').match(/CURRENT_PROJECT_VERSION = 5;/g) || []).length, 2);
+  assert.equal(CONFIG.build, 6);
+  assert.equal((read('ios/App/App.xcodeproj/project.pbxproj').match(/CURRENT_PROJECT_VERSION = 6;/g) || []).length, 2);
 });

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "SHOOTOUT 4 — IPKSF World Penalty Championship (Capacitor 8 iOS / v1.0.0 Build 5)",
+  "description": "SHOOTOUT 4 — IPKSF World Penalty Championship (Capacitor 8 iOS / v1.0.0 Build 6)",
   "license": "UNLICENSED",
   "engines": { "node": ">=22.0.0" },
   "scripts": {

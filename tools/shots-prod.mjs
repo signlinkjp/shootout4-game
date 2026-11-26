@@ -1,5 +1,5 @@
 /**
- * SHOOTOUT 4 — 実ブラウザ E2E（Chromium / Playwright） Build 4
+ * SHOOTOUT 4 — 実ブラウザ E2E（Chromium / Playwright） Build 6
  *
  *   node tools/shots-prod.mjs          … 全チェック＋スクリーンショット
  *   node tools/shots-prod.mjs smoke    … 起動確認だけ
@@ -1058,7 +1058,7 @@ async function main() {
       afterImpact.goal === true && afterImpact.score === '1' && afterImpact.cells === 1
       && /あなた: 右下/.test(afterImpact.status) && /相手: 左上/.test(afterImpact.status)
       && /ゴール/.test(afterImpact.banner), afterImpact);
-    check('K4 ゴールの瞬間に「ゴール！」のボイスが鳴る',
+    check('K4 ゴールの瞬間に演出音（ホーン＋ファンファーレ）が鳴る',
       (afterImpact.audio.voices.goal ?? 0) >= 1 && afterImpact.audio.voice?.kind === 'goal', afterImpact.audio);
     await b4shot(page, 'impact');
 
@@ -1078,7 +1078,7 @@ async function main() {
       cpuLit: document.querySelectorAll('.zone.is-cpu').length,
       audio: window.__SHOOTOUT__.audio,
     }));
-    check('K5 セーブでも相手の方向は着弾まで出さず、声は「セーブ！」',
+    check('K5 セーブでも相手の方向は着弾まで出さず、演出音は「セーブ」',
       saveAtKick.cpuLit === 0 && saveDone.cpuLit === 1 && /セーブ/.test(saveDone.banner)
       && (saveDone.audio.voices.save ?? 0) >= 1 && saveDone.audio.voice?.kind === 'save', { saveAtKick, saveDone });
 
@@ -1310,31 +1310,41 @@ async function main() {
     await b4shot(page, 'result-share');
 
     /* ============================================================== *\
-     * L. Build 5（ボイスは人の声・キーパーの方向説明）
+     * L. Build 6（棒読みボイス廃止・演出音の強化・キーパーの方向説明）
      * ============================================================== */
-    const goalVoice = await page.evaluate(() => {
+    const goalShowcase = await page.evaluate(() => {
       window.__SHOOTOUT__.setPrefs({ language: 'ja' });
+      const before = window.__SHOOTOUT__.audio.voices.goal ?? 0;
       const result = window.__SHOOTOUT__.voice('goal');
-      return { result, voice: window.__SHOOTOUT__.audio.voice };
+      return { result, before, audio: window.__SHOOTOUT__.audio };
     });
-    check('L1 ゴールのボイスは言葉で鳴る（絵文字なし・発声経路が分かる）',
-      goalVoice.voice?.kind === 'goal' && goalVoice.voice.text === 'ゴール'
-      && /^[\p{L}\p{N} ]+$/u.test(goalVoice.voice.text)
-      && ['native', 'browser', 'formant'].includes(goalVoice.voice.spoken)
-      && goalVoice.voice.language === 'ja', goalVoice);
+    check('L1 ゴールはスタジアムホーン＋勝利のファンファーレ（音声の読み上げなし）',
+      goalShowcase.result?.kind === 'goal' && goalShowcase.result?.mode === 'showcase'
+      && (goalShowcase.audio.voices.goal ?? 0) > goalShowcase.before
+      && goalShowcase.audio.voice?.kind === 'goal'
+      && goalShowcase.audio.voice?.text === undefined
+      && !Object.prototype.hasOwnProperty.call(goalShowcase.audio, 'speech'), goalShowcase);
 
-    const voiceByLanguage = [];
-    for (const language of languages) {
-      const info = await page.evaluate((tag) => {
-        window.__SHOOTOUT__.setPrefs({ language: tag });
-        window.__SHOOTOUT__.voice('miss', null, tag);
-        const voice = window.__SHOOTOUT__.audio.voice;
-        return { text: voice?.text ?? '', language: voice?.language ?? '', kind: voice?.kind ?? '' };
-      }, language);
-      if (!info.text || info.kind !== 'miss' || /[^\p{L}\p{N} ]/u.test(info.text)) voiceByLanguage.push({ language, ...info });
+    const showcaseProblems = [];
+    for (const kind of ['goal', 'save', 'miss']) {
+      const info = await page.evaluate((value) => {
+        const before = window.__SHOOTOUT__.audio.voices[value] ?? 0;
+        const result = window.__SHOOTOUT__.voice(value);
+        const audio = window.__SHOOTOUT__.audio;
+        return {
+          result,
+          counted: (audio.voices[value] ?? 0) === before + 1,
+          last: audio.voice?.kind ?? '',
+          mode: audio.voice?.mode ?? '',
+          speech: Object.prototype.hasOwnProperty.call(audio, 'speech'),
+        };
+      }, kind);
+      if (info.result?.kind !== kind || info.result?.mode !== 'showcase' || !info.counted
+        || info.last !== kind || info.mode !== 'showcase' || info.speech) {
+        showcaseProblems.push({ kind, ...info });
+      }
     }
-    check('L5 ミスキックのボイスも12言語で言葉になる（絵文字・記号なし）', voiceByLanguage.length === 0, voiceByLanguage);
-    await page.evaluate(() => window.__SHOOTOUT__.setPrefs({ language: 'ja' }));
+    check('L5 ゴール/セーブ/ミスが別々の演出音として鳴り、音声合成の記録を持たない', showcaseProblems.length === 0, showcaseProblems);
 
     /* 遊び方: キーパーの方向の説明（12言語・例がボタンの文言と一致） */
     const keeperRuleProblems = [];
