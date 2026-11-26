@@ -126,7 +126,7 @@ GitHub の画面からしか追加できない（連携の権限のため）の�
    - 単体テスト（47件）と実ブラウザE2E（34項目）
    - 7秒・4択・5本・サドンデスのルール検査
    - 3DがCDNではなく同梱のThree.jsで動くこと
-   - 16か国・12言語・PRO商品ID・アイコン（1024 RGB）
+   - 32か国・12言語・PRO商品ID・アイコン（1024 RGB）
    - iOS プロジェクトの契約チェック（`tools/verify-ios-project.mjs`）
 2. **testflight**（macOS）
    - 署名 → `.xcarchive` → IPA → 検証 → TestFlight へアップロード

@@ -15,6 +15,9 @@
  */
 
 export const DIRECTIONS = Object.freeze(['TL', 'TR', 'BL', 'BR']);
+/** 時間切れ: ゴールを狙わず枠外へ蹴る（7秒以内に決めなかったとき） */
+export const MISS = 'OUT';
+export const PICKABLE = Object.freeze([...DIRECTIONS, MISS]);
 export const SIDES = Object.freeze(['me', 'opp']);
 export const KICKERS = 5;
 
@@ -28,6 +31,11 @@ export const ZONES = Object.freeze({
 
 export function isDirection(value) {
   return DIRECTIONS.includes(value);
+}
+
+/** 送ってよい手（4方向 + 時間切れの枠外） */
+export function isPick(value) {
+  return PICKABLE.includes(value);
 }
 
 export function otherSide(side) {
@@ -47,10 +55,10 @@ export function newMatch({ first = 'me' } = {}) {
   };
 }
 
-/** いま蹴る側のキッカー番号（1〜5、サドンデスは6本目から1に戻る） */
+/** いま蹴る側のキッカー番号（1〜5。サドンデスも1番から順に回る） */
 export function kickerNumber(state, side = state.turn) {
   const played = state.kicks[side].length;
-  return (played % 6) + 1;
+  return (played % KICKERS) + 1;
 }
 
 /** 通常PKかサドンデスか */
@@ -92,20 +100,26 @@ export function decidedWinner(state) {
  * 1本を解決する。shot = 蹴る側の狙い、save = 止める側の飛ぶ方向。
  * state は変更せず、新しい state を返す（履歴は追記のみ）。
  */
-export function resolveKick(state, { shot, save } = {}) {
+export function resolveKick(state, { shot, save, timeout = false, stuck = false } = {}) {
   if (state.winner) throw new Error('match finished');
-  if (!isDirection(shot) || !isDirection(save)) throw new TypeError('invalid direction');
+  if (!isPick(shot)) throw new TypeError('invalid shot');
+  if (!stuck && !isDirection(save)) throw new TypeError('invalid save');
 
   const side = state.turn;
   const keeper = otherSide(side);
-  const goal = shot !== save;
+  /* 枠外（時間切れ）は必ず外れる。キーパーが動けなかった場合（stuck）は必ず入る。 */
+  const miss = shot === MISS;
+  const goal = !miss && (stuck ? true : shot !== save);
   const event = {
     index: state.history.length,
     side,
     keeper,
     shot,
-    save,
+    save: miss ? null : save,
     goal,
+    miss,
+    stuck: Boolean(stuck) && !miss,
+    timeout: Boolean(timeout),
     kicker: kickerNumber(state, side),
     round: state.kicks[side].length + 1,
     phase: phase(state),
@@ -193,7 +207,7 @@ export function validateOnlineKick(payload, { self, seen = new Set(), maxRounds 
   if (!from || from === self) return { ok: false, reason: 'self' };
   const round = Number(payload.round);
   if (!Number.isInteger(round) || round < 0 || round >= maxRounds) return { ok: false, reason: 'round' };
-  if (!isDirection(payload.dir)) return { ok: false, reason: 'dir' };
+  if (!isPick(payload.dir)) return { ok: false, reason: 'dir' };
   if (seen.has(`${from}:${round}`)) return { ok: false, reason: 'dup' };
   return { ok: true, from, round, dir: payload.dir };
 }

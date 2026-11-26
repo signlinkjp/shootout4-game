@@ -3,7 +3,7 @@
 import { getCountry, countryName } from '../core/countries.js';
 import { flag, icon, esc, screenShell } from './layout.js';
 
-export function onlineView({ t, entitled, language, state = {} }) {
+export function onlineView({ t, entitled, language, state = {}, registered = false, officialCountry = null }) {
   const { mode = 'menu', scope = 'domestic', code = '', status = '', opponent = null, searching = false } = state;
   const quickDisabled = scope === 'world' && !entitled;
   return screenShell({
@@ -17,6 +17,10 @@ export function onlineView({ t, entitled, language, state = {} }) {
       </section>
 
       ${quickDisabled ? `<p class="notice">${esc(t('onlineProRequired'))} <button class="link" data-action="pro">${esc(t('proTitle'))} ›</button></p>` : ''}
+      ${officialCountry ? `<p class="mini mini--center online__nation">${flag(officialCountry, 'flag flag--xs')}
+        <span>${esc(countryName(officialCountry, language))}</span>
+        ${registered ? '' : ` · <button class="link" data-action="register">${esc(t('registerOpen'))}</button>`}
+      </p>` : ''}
 
       <section class="panel">
         <h2 class="section-title">${esc(t('quickMatch'))}</h2>

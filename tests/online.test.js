@@ -355,3 +355,62 @@ test('タイムアップの代わりの方向は決定的', () => {
   assert.equal(fallbackDirection(0, 5), fallbackDirection(0, 5));
   assert.ok(['TL', 'TR', 'BL', 'BR'].includes(fallbackDirection(3, 2)));
 });
+
+/* ------------------------------------------------------------------ *\
+ * Build 2: キーパーの左右同期・時間切れの枠外（OUT）
+ * ------------------------------------------------------------------ */
+
+function captureClient() {
+  const sent = [];
+  return {
+    clientId: 'me',
+    sent,
+    broadcast: (name, event, payload) => { sent.push({ name, event, payload }); return true; },
+    subscribe: () => {},
+    unsubscribe: () => {},
+    track: () => {},
+  };
+}
+
+test('キーパーの左右位置は80〜120msに1回だけ送る（駆け引きの同期）', () => {
+  const client = captureClient();
+  const session = new ShootoutSession({ client, now: () => 0 });
+  session.channel = 'shootout-match:me-other';
+  session.matchName = session.channel;
+  assert.equal(session.sendKeeper(0.4, { now: 1000 }), true);
+  assert.equal(session.sendKeeper(0.9, { now: 1050 }), false, '間隔が短すぎる送信は捨てる');
+  assert.equal(session.sendKeeper(-0.3, { now: 1100 }), true);
+  assert.equal(client.sent.length, 2);
+  assert.equal(client.sent[1].event, 'keeper');
+  assert.equal(client.sent[1].payload.x, -0.3);
+  assert.equal(session.sendKeeper(5, { now: 1200, force: true }), true);
+  assert.equal(client.sent[2].payload.x, 1, '範囲は -1〜1 に丸める');
+});
+
+test('相手のキーパー位置を受け取り、範囲外・自分の手は捨てる', () => {
+  const events = [];
+  const client = captureClient();
+  const session = new ShootoutSession({ client, onEvent: (event) => events.push(event) });
+  session.channel = 'shootout-match:me-other';
+  session.matchName = session.channel;
+  session.handleBroadcast(session.channel, 'keeper', { from: 'other', x: 0.5 });
+  session.handleBroadcast(session.channel, 'keeper', { from: 'me', x: 0.2 });
+  session.handleBroadcast(session.channel, 'keeper', { from: 'other', x: 9 });
+  session.handleBroadcast(session.channel, 'keeper', { from: 'other', x: -0.4 });
+  const kept = events.filter((event) => event.type === 'opponent-keeper');
+  assert.deepEqual(kept.map((event) => event.x), [0.5, -0.4]);
+});
+
+test('時間切れの枠外（OUT）も通信で通り、両者の結果が一致する', () => {
+  const client = captureClient();
+  const session = new ShootoutSession({ client });
+  session.channel = 'shootout-match:me-other';
+  session.matchName = session.channel;
+  assert.equal(session.pick(0, 'OUT', { timeout: true }), true, 'OUT は送れる');
+  assert.equal(session.pick(1, 'CENTER'), false, '未知の手は送れない');
+  const event = session.forceResolve(0, 'OUT', 'TL');
+  assert.equal(event.goal, false);
+  assert.equal(event.miss, true);
+  assert.equal(event.save, null);
+  assert.equal(event.shooter, 'home');
+});

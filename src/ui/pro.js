@@ -10,6 +10,8 @@ export function proView({ t, entitled, language, diagnostic, price }) {
     ['globe', 'proBenefitRank'],
     ['users', 'proBenefitFriend'],
     ['shirt', 'proBenefitLocker'],
+    ['body', 'proBenefitCharacter'],
+    ['globe', 'proBenefitCountries'],
   ];
   return screenShell({
     title: t('proTitle'),

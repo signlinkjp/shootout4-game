@@ -48,17 +48,28 @@ export function unlockAudio() {
       if (!Ctor) return false;
       state.ctx = new Ctor({ latencyHint: 'interactive' });
       state.master = state.ctx.createGain();
-      state.master.gain.value = 0.9;
+      state.master.gain.value = 1;
       state.master.connect(state.ctx.destination);
-      bus('sfxBus', 0.9);
-      bus('musicBus', 0.5);
-      bus('crowdBus', 0.75);
+      bus('sfxBus', 1);
+      bus('musicBus', 0.45);
+      bus('crowdBus', 0.95);
       state.noise = null;
     }
     /* resume() は環境によっては返ってこない。await せずに走らせる
        （音が鳴らなくてもゲームは止めない） */
     if (state.ctx.state === 'suspended') {
       state.ctx.resume().catch(() => {});
+    }
+    /* iOS: 無音の1サンプルを実際に再生して AudioContext を起こす
+       （Build 1 はここが無く、実機で音が出なかった） */
+    try {
+      const buffer = state.ctx.createBuffer(1, 1, 22050);
+      const source = state.ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(state.ctx.destination);
+      source.start(0);
+    } catch {
+      /* 起こせなくても次の操作で再挑戦する */
     }
     /* iOS: アプリ側の Audio Session を playback にする（AppDelegate のブリッジ） */
     if (typeof navigator !== 'undefined' && navigator.audioSession) {
@@ -93,15 +104,20 @@ export function configureAudio(settings) {
   state.settings = { ...state.settings, ...settings };
   if (!state.ctx) return;
   const now = state.ctx.currentTime;
-  state.sfxBus?.gain.setTargetAtTime(state.settings.sound ? 0.9 : 0.0001, now, 0.05);
-  state.musicBus?.gain.setTargetAtTime(state.settings.bgm ? 0.38 : 0.0001, now, 0.08);
-  state.crowdBus?.gain.setTargetAtTime(state.settings.sound ? 0.7 : 0.0001, now, 0.08);
+  state.sfxBus?.gain.setTargetAtTime(state.settings.sound ? 1 : 0.0001, now, 0.05);
+  state.musicBus?.gain.setTargetAtTime(state.settings.bgm ? 0.42 : 0.0001, now, 0.08);
+  state.crowdBus?.gain.setTargetAtTime(state.settings.sound ? 0.92 : 0.0001, now, 0.08);
   if (state.settings.bgm) startMusic();
   else stopMusic();
 }
 
+/**
+ * 音を出せる状態か。
+ * 予約した音は resume() の完了後に鳴るので、'suspended' でも「鳴らす」側に倒す
+ * （Build 1 は running になるまで全て捨てていて、実機で無音になった）。
+ */
 export function ready() {
-  return Boolean(state.ctx && state.ctx.state === 'running');
+  return Boolean(state.ctx && state.ctx.state !== 'closed');
 }
 
 function noiseBuffer() {
@@ -224,11 +240,11 @@ export function gloveSound() {
 export function goalRoar(seconds = 2.2) {
   if (!state.settings.sound) return;
   const d = Math.max(0.6, Math.min(3.4, seconds));
-  noise({ dur: d, gain: 0.22, low: 220, high: 4200, q: 0.5, bus: 'crowdBus' });
-  noise({ dur: d * 0.8, gain: 0.12, low: 900, high: 6200, q: 0.4, bus: 'crowdBus' });
+  noise({ dur: d, gain: 0.36, low: 220, high: 4400, q: 0.5, bus: 'crowdBus' });
+  noise({ dur: d * 0.8, gain: 0.2, low: 900, high: 6400, q: 0.4, bus: 'crowdBus' });
   /* スタジアムホーン */
-  tone({ freq: 233, end: 233, dur: 0.5, gain: 0.05, type: 'sawtooth', bus: 'sfxBus' });
-  tone({ freq: 349, end: 349, dur: 0.5, gain: 0.035, type: 'sawtooth', bus: 'sfxBus' });
+  tone({ freq: 233, end: 233, dur: 0.5, gain: 0.075, type: 'sawtooth', bus: 'sfxBus' });
+  tone({ freq: 349, end: 349, dur: 0.5, gain: 0.05, type: 'sawtooth', bus: 'sfxBus' });
   /* ファンファーレ */
   [523.25, 659.25, 783.99, 1046.5].forEach((freq, index) => {
     tone({ freq, end: freq, dur: 0.32, gain: 0.035, type: 'triangle', delay: 0.1 + index * 0.11 });
@@ -238,7 +254,7 @@ export function goalRoar(seconds = 2.2) {
 
 export function saveGroan() {
   if (!state.settings.sound) return;
-  noise({ dur: 0.85, gain: 0.16, low: 180, high: 1300, q: 0.6, bus: 'crowdBus' });
+  noise({ dur: 0.85, gain: 0.24, low: 180, high: 1300, q: 0.6, bus: 'crowdBus' });
   tone({ freq: 320, end: 190, dur: 0.5, gain: 0.045, type: 'sine', delay: 0.05 });
   vibrate(50);
 }
@@ -286,7 +302,7 @@ export function startCrowd(country) {
   gain.gain.value = 0.0001;
   src.connect(filter).connect(high).connect(gain).connect(state.crowdBus);
   src.start();
-  gain.gain.setTargetAtTime(0.16 * crowd.density, ctx.currentTime, 0.6);
+  gain.gain.setTargetAtTime(0.22 * crowd.density, ctx.currentTime, 0.6);
   state.crowdSource = src;
   state.crowdFilter = filter;
   state.crowdGain = gain;
@@ -334,11 +350,11 @@ export function stopCrowd() {
 export function crowdSurge(amount = 1) {
   const ctx = state.ctx;
   if (!ctx || !state.crowdGain || !ready()) return;
-  const target = Math.min(0.4, 0.16 + amount * 0.16);
+  const target = Math.min(0.52, 0.22 + amount * 0.2);
   state.crowdGain.gain.setTargetAtTime(target, ctx.currentTime, 0.25);
   setTimeout(() => {
     if (!state.crowdGain) return;
-    state.crowdGain.gain.setTargetAtTime(0.18, ctx.currentTime, 1.1);
+    state.crowdGain.gain.setTargetAtTime(0.24, ctx.currentTime, 1.1);
   }, 1200);
 }
 
@@ -392,10 +408,29 @@ export function openingCrowd(seconds = 3) {
   tone({ freq: 116, end: 58, dur: d * 0.8, gain: 0.06, type: 'triangle', bus: 'crowdBus' });
 }
 
+/**
+ * 設定画面の「音をテスト」。スピーカー・消音スイッチ・音量の確認用に、
+ * ホイッスル → キック → ゴール歓声 を1回鳴らす。
+ */
+export function testSound() {
+  const ok = unlockAudio();
+  const before = { ...state.settings };
+  /* テスト中だけ音を出す（終わったら元のON/OFFへ戻す） */
+  configureAudio({ sound: true, bgm: before.bgm });
+  whistle();
+  kickSound();
+  setTimeout(() => netSound(), 220);
+  setTimeout(() => goalRoar(1.6), 300);
+  setTimeout(() => crowdSurge(1), 320);
+  setTimeout(() => configureAudio(before), 2600);
+  return ok;
+}
+
 /** テスト用: 内部状態（画面を出さずに確認する） */
 export function audioState() {
   return {
     ready: ready(),
+    context: state.ctx ? state.ctx.state : 'none',
     settings: { ...state.settings },
     crowd: Boolean(state.crowdSource),
     music: Boolean(state.musicTimer),

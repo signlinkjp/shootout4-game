@@ -5,7 +5,7 @@
 
 import { CONFIG } from '../config.js';
 import { getCountry, countryName } from '../core/countries.js';
-import { getKit, getBoot } from '../core/skins.js';
+import { getShirt, getShorts, getSocks, getBoot } from '../core/skins.js';
 
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -35,6 +35,10 @@ const ICONS = {
   check: '<path d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
   plus: '<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
   door: '<path d="M14 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7M16 8l4 4-4 4M20 12H10" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>',
+  id: '<rect x="3.5" y="5" width="17" height="14" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="11" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M5.8 16.2c.5-1.7 1.7-2.6 3.2-2.6s2.7.9 3.2 2.6M14.5 9.4h4M14.5 12.4h4M14.5 15.4h2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+  body: '<circle cx="12" cy="6.6" r="2.8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7.6 20c.4-4 2.1-6 4.4-6s4 2 4.4 6M4.8 12.2l1.8-1.4M19.2 12.2l-1.8-1.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+  foot: '<path d="M9 3.5h3.2c.5 3 .7 5.6.7 8 0 2.2-.3 3.9-.9 5.2h-3c.6-1.6.9-3.4.9-5.4 0-2.4-.4-5-.9-7.8zM5 19.5h12c1.4 0 2.2-.6 2.2-1.7 0-.9-.6-1.5-1.6-1.6l-3.6-.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>',
+  soundwave: '<path d="M4 10v4h3l4 3.5v-11L7 10z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15 8.6a5 5 0 0 1 0 6.8M17.8 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
 };
 
 export function icon(name, className = '') {
@@ -97,10 +101,19 @@ export function toggleRow(key, value, t) {
   </div>`;
 }
 
-export function kitChip(kitId, { small = false } = {}) {
-  const kit = getKit(kitId);
-  const designClass = `kit--${kit.design}`;
-  return `<span class="kit ${designClass} ${small ? 'kit--small' : ''}" style="--kit-primary:${kit.primary};--kit-secondary:${kit.secondary};--kit-accent:${kit.accent};--kit-shorts:${kit.shorts};--kit-socks:${kit.socks}" aria-hidden="true"><i class="kit__body"></i><i class="kit__shorts"></i></span>`;
+export function shirtChip(shirtId, { small = false } = {}) {
+  const shirt = getShirt(shirtId);
+  return `<span class="kit kit--${shirt.design} ${small ? 'kit--small' : ''}" style="--kit-primary:${shirt.primary};--kit-secondary:${shirt.secondary};--kit-accent:${shirt.accent};--kit-shorts:${shirt.primary};--kit-socks:${shirt.secondary}" aria-hidden="true"><i class="kit__body"></i></span>`;
+}
+
+export function shortsChip(shortsId) {
+  const shorts = getShorts(shortsId);
+  return `<span class="partchip partchip--shorts" style="--part:${shorts.color};--part-trim:${shorts.trim}" aria-hidden="true"><i></i></span>`;
+}
+
+export function socksChip(socksId) {
+  const socks = getSocks(socksId);
+  return `<span class="partchip partchip--socks" style="--part:${socks.color};--part-trim:${socks.band}" aria-hidden="true"><i></i></span>`;
 }
 
 export function bootChip(bootId) {

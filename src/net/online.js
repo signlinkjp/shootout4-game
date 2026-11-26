@@ -17,7 +17,7 @@
  */
 
 import { CONFIG } from '../config.js';
-import { DIRECTIONS, payloadTooLarge, validateOnlineKick, validateStamp, MAX_TOTAL_KICKS } from '../core/rules.js';
+import { DIRECTIONS, MISS, isPick, payloadTooLarge, validateOnlineKick, validateStamp, MAX_TOTAL_KICKS } from '../core/rules.js';
 import { RealtimeClient, realtimeUrl, presenceMembers } from './realtime.js';
 
 export { RealtimeClient, realtimeUrl, presenceMembers };
@@ -89,6 +89,8 @@ const WAIT_LINGER_MS = 2500;
 const REVEAL_GRACE_MS = 1400;
 export const ONLINE_TURN_MS = 7000;
 export const MATCH_TIMEOUT_MS = 30000;
+/** キーパーの左右位置を相手へ送る間隔（80〜120ms。毎フレーム送らない） */
+export const KEEPER_SYNC_MS = 100;
 
 export class ShootoutSession {
   constructor({
@@ -389,10 +391,37 @@ export class ShootoutSession {
       return;
     }
 
+    if (event === 'keeper') {
+      const from = typeof payload.from === 'string' ? payload.from.slice(0, 40) : '';
+      if (!from || from === mine) return;
+      const x = Number(payload.x);
+      if (!Number.isFinite(x) || x < -1.2 || x > 1.2) return;
+      this.emit({ type: 'opponent-keeper', x: Math.max(-1, Math.min(1, x)) });
+      return;
+    }
+
     if (event === 'bye') {
       if (payload.from === mine) return;
       this.emit({ type: 'opponent-left' });
     }
+  }
+
+  /**
+   * キーパーの左右位置を相手へ送る（駆け引き用・決定ではない）。
+   * 80〜120ms に1回だけ。送れなかったときは false（次の指の動きで送る）。
+   */
+  sendKeeper(x, { now = this.now(), force = false } = {}) {
+    if (!this.matchName) return false;
+    const value = Number(x);
+    if (!Number.isFinite(value)) return false;
+    const clamped = Math.max(-1, Math.min(1, value));
+    if (!force && now - (this.lastKeeperAt || 0) < KEEPER_SYNC_MS) return false;
+    const sent = this.client.broadcast(this.matchName, 'keeper', {
+      from: this.client.clientId,
+      x: Number(clamped.toFixed(2)),
+    });
+    if (sent) this.lastKeeperAt = now;
+    return sent;
   }
 
   /** 自分の方向を送る（送れたときだけ記録する） */
@@ -400,7 +429,7 @@ export class ShootoutSession {
     if (!this.matchName) return false;
     const index = Number(round);
     if (!Number.isInteger(index) || index < 0 || index >= MAX_TOTAL_KICKS) return false;
-    if (!DIRECTIONS.includes(dir)) return false;
+    if (!isPick(dir)) return false;
     if (this.myPicks.has(index) || this.resolved.has(index)) return false;
     const sent = this.client.broadcast(this.matchName, 'pick', {
       from: this.client.clientId,
@@ -426,8 +455,13 @@ export class ShootoutSession {
       if (this.resolved.has(round)) return;
       if (!this.myPicks.has(round) || !this.oppPicks.has(round)) {
         const seed = String(this.client.clientId).length + String(this.opponent?.key || '').length;
-        const home = this.myPicks.get(round) || this.oppPicks.get(round) || fallbackDirection(round, seed);
-        const away = this.oppPicks.get(round) || this.myPicks.get(round) || fallbackDirection(round, seed + 1);
+        const shooterSide = this.shooterOf(round);
+        const mineSide = this.mySide;
+        /* 蹴る側が時間切れなら枠外。止める側が間に合わなければ、蹴った方向はそのまま届いている */
+        const mine = this.myPicks.get(round) || (shooterSide === mineSide ? MISS : fallbackDirection(round, seed));
+        const theirs = this.oppPicks.get(round) || (shooterSide !== mineSide ? MISS : fallbackDirection(round, seed + 1));
+        const home = mineSide === 'home' ? mine : theirs;
+        const away = mineSide === 'home' ? theirs : mine;
         this.client.broadcast(this.matchName, 'reveal', { round, home, away });
         this.forceResolve(round, home, away);
       }
@@ -459,19 +493,21 @@ export class ShootoutSession {
   forceResolve(round, home, away) {
     const index = Number(round);
     if (this.resolved.has(index)) return null;
-    if (!DIRECTIONS.includes(home) || !DIRECTIONS.includes(away)) return null;
+    if (!isPick(home) || !isPick(away)) return null;
     this.resolved.add(index);
     const shooter = this.shooterOf(index);
     const shot = shooter === 'home' ? home : away;
     const save = shooter === 'home' ? away : home;
-    const goal = shot !== save;
+    const miss = shot === MISS;
+    const goal = !miss && shot !== save;
     const event = {
       type: 'kick',
       round: index,
       shooter, /* 'home' | 'away' */
       shooterSide: shooter === this.mySide ? 'me' : 'opp',
       shot,
-      save,
+      save: miss ? null : save,
+      miss,
       goal,
     };
     this.emit(event);
@@ -526,6 +562,7 @@ export class ShootoutSession {
     this.opponentSeen = false;
     this.revealRound = -1;
     this.lastStampAt = 0;
+    this.lastKeeperAt = 0;
     this.knownNames = new Map();
     this.trackMeta = new Map();
     this.rank?.close();

@@ -10,7 +10,7 @@
 
 ## プロモーションテキスト（170文字以内）
 - 日本語:
-  `世界16か国から自分の国を選び、4つのコースと7秒の制限時間で読み合うPK対決。ゴールネットが揺れる3Dスタジアム、国別の歓声、5人＋サドンデスのPKスコアボード。能力差ゼロ、純粋な心理戦です。`
+  `世界32か国（無料16 + PRO16）から自分の国を選び、4つのコースと7秒の制限時間で読み合うPK対決。ゴールネットが揺れる3Dスタジアム、国別の歓声、5人＋サドンデスのPKスコアボード。能力差ゼロ、純粋な心理戦です。`
 - English:
   `Pick one of 16 nations and win the shootout with four corners and seven seconds of nerve. A 3D stadium with swaying nets, national crowds, five kickers and sudden death. No stat gaps — pure mind games.`
 
@@ -31,7 +31,7 @@
 紙吹雪と歓声がゴールを祝います。キッカー5人とキーパーは3Dモデルで、
 選んだユニフォームとスパイクがそのままピッチに反映されます。
 
-■ 16か国と国別の歓声
+■ 32か国と国別の歓声
 日本・ブラジル・イングランド・スペイン・ドイツ・イタリア・フランス・アルゼンチン・
 ポルトガル・オランダ・クロアチア・モロッコ・韓国・アメリカ・メキシコ・ナイジェリア。
 相手の国とCPUの強さ（初級・中級・上級・最強）を選べます。
@@ -83,7 +83,7 @@ PK,サッカー,点PK,シュート,キーパー,心理戦,スポーツ,対戦,�
 
 ## スクリーンショット（6.7インチ 1290×2796）
 1. `shootout4-prod-home.png` — ホーム（エンブレムと世界観）
-2. `shootout4-prod-country.png` — 国えらび（16か国・CPUの強さ）
+2. `shootout4-prod-country.png` — 国えらび（32か国・PROロック・CPUの強さ）
 3. `shootout4-prod-match-day.png` — デイの試合（3Dスタジアム・4択・7秒）
 4. `shootout4-prod-aim.png` — 方向を選んだ瞬間
 5. `shootout4-prod-goal.png` — ゴール演出（ネット・紙吹雪・GK）

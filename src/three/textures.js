@@ -5,7 +5,7 @@
  * 色はキットの指定から作るため、ロッカーで選んだ柄がそのまま3Dに出る。
  */
 
-import { kitSpec } from '../core/skins.js';
+import { shirtSpec } from '../core/skins.js';
 
 function canvas(width, height) {
   const element = document.createElement('canvas');
@@ -196,13 +196,10 @@ export function kitTextureFromSpec(spec) {
 }
 
 /** ユニフォームの柄（キットIDから） */
-export function kitTexture(kitId) {
-  return kitTextureFromSpec(kitSpec(kitId));
-}
 
 /** 背番号（透明地） */
-export function numberTexture(number, kitId) {
-  const spec = kitSpec(kitId);
+export function numberTexture(number, shirt) {
+  const spec = typeof shirt === 'string' ? shirtSpec(shirt) : (shirt || shirtSpec('chalk-home'));
   const el = canvas(256, 256);
   const ctx = el.getContext('2d');
   ctx.clearRect(0, 0, 256, 256);

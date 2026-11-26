@@ -1,22 +1,26 @@
 /** SHOOTOUT 4 — 国えらび（自分の国・相手の国・CPUの強さ） */
 
-import { COUNTRIES, countryName, getCountry } from '../core/countries.js';
+import { COUNTRIES, countryName, getCountry, isCountryUnlocked } from '../core/countries.js';
 import { LEVELS, levelStars } from '../core/cpu.js';
 import { countryKit } from '../core/countries.js';
 import { flag, icon, esc, screenShell } from './layout.js';
 
-function strip({ t, selected, action, language }) {
+function strip({ t, selected, action, language, entitled }) {
   return `<div class="strip" role="listbox" aria-label="${esc(t('countryTitle'))}">
-    ${COUNTRIES.map((country) => `<button class="strip__item ${country.code === selected ? 'is-on' : ''}"
+    ${COUNTRIES.map((country) => {
+      const locked = !isCountryUnlocked(country.code, entitled);
+      return `<button class="strip__item ${country.code === selected ? 'is-on' : ''} ${locked ? 'is-locked' : ''}"
         role="option" aria-selected="${country.code === selected}"
         data-${action}="${country.code}" data-testid="${action}-${country.code}">
-      ${flag(country.code)}
-      <span>${esc(countryName(country.code, language))}</span>
-    </button>`).join('')}
+        ${flag(country.code)}
+        <span>${esc(countryName(country.code, language))}</span>
+        ${locked ? `<em class="strip__pro">🔒 PRO</em>` : ''}
+      </button>`;
+    }).join('')}
   </div>`;
 }
 
-export function countryView({ t, prefs, language }) {
+export function countryView({ t, prefs, entitled, language }) {
   const me = getCountry(prefs.country);
   const opp = getCountry(prefs.opponent || 'BR');
   const opponentAction = 'opponent';
@@ -28,7 +32,7 @@ export function countryView({ t, prefs, language }) {
     body: `
       <section class="panel">
         <h2 class="section-title">${esc(t('yourCountry'))}</h2>
-        ${strip({ t, selected: me.code, action: 'mycountry', language })}
+        ${strip({ t, selected: me.code, action: 'mycountry', language, entitled })}
       </section>
 
       <section class="panel">
@@ -36,7 +40,7 @@ export function countryView({ t, prefs, language }) {
           <h2 class="section-title">${esc(t('opponentCountry'))}</h2>
           <button class="btn btn--tiny" data-action="random-opponent">${esc(t('randomOpponent'))}</button>
         </div>
-        ${strip({ t, selected: opp.code, action: opponentAction, language })}
+        ${strip({ t, selected: opp.code, action: opponentAction, language, entitled })}
         <div class="row row--stack">
           <span class="row__label">${esc(t('cpuLevel'))}</span>
           <div class="segmented segmented--four" role="group" aria-label="${esc(t('cpuLevel'))}">
@@ -69,7 +73,10 @@ export function countryView({ t, prefs, language }) {
       <button class="btn btn--primary btn--xl btn--block" data-action="kickoff" data-testid="kickoff">
         ${icon('ball')}<span>${esc(t('startMatch'))}</span>
       </button>
-      <p class="mini">${esc(t('fairness'))}</p>
+      <div class="country__note">
+        <p class="mini">${esc(t('fairness'))}</p>
+        <p class="mini">${esc(t('proBenefitCountries'))} · ${esc(t('versionNote'))}</p>
+      </div>
     `,
   });
 }

@@ -1,7 +1,7 @@
 # SHOOTOUT 4 — IPKSF World Penalty Championship
 
-iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 1）。
-`クイック対戦`・`CPU対戦`・`フレンド対戦`・`世界ランキング`・`ロッカー（ユニフォーム＆スパイク）`・
+iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 2）。
+`クイック対戦`・`CPU対戦`・`フレンド対戦`・`世界ランキング`・`ロッカー（キャラクター＋4部位）`・
 `IPKSF 公式加盟（PRO・買い切り ¥300）` を、Capacitor 8 + 素の HTML/CSS/JS（ES Modules）で実装しています。
 
 ```
@@ -23,10 +23,10 @@ python3 -m http.server 4173
 ## テスト
 
 ```bash
-npm test                                  # 単体テスト 47件（node --test）
+npm test                                  # 単体テスト 67件（node --test）
 node tools/verify-ios-project.mjs         # iOS プロジェクトの契約チェック 44項目
 bash tools/preflight-local.sh             # CI の preflight と同じガード
-node tools/shots-prod.mjs                 # 実ブラウザ E2E 34項目＋スクリーンショット
+node tools/shots-prod.mjs                 # 実ブラウザ E2E 55項目＋スクリーンショット
 ```
 
 E2E は Chromium（Playwright）で、実際の画面を操作して次を確認します。
@@ -60,16 +60,18 @@ src/
   core/
     rules.js          PKの進行（純粋関数・乱数なし）・早期決着・スコアボード
     cpu.js            CPUの心理戦AI（4段階。能力は変えず「読み」だけ変える）
-    skins.js          ユニフォーム10種・スパイク6種（能力値は持たない）
-    countries.js      16か国（国旗・国名・歓声の性格・チームカラー）
+    skins.js          4部位（ユニフォーム16・パンツ10・靴下10・スパイク12）と2種キャラ（能力値は持たない）
+    countries.js      32か国（無料16 + PRO16・国旗・国名・歓声の性格・チームカラー）
+    registration.js   IPKSF 公式選手登録（代表国・名前・利き足・チームメイト2〜5番）
   net/
     realtime.js       Supabase Realtime の最小クライアント（再接続つき）
     online.js         クイック/フレンド対戦・スタンプ・ランキング
   platform/iap.js     StoreKit 2 ブリッジ（PRO・復元・プレビューのテスト解錠）
   three/
-    stadium.js        3Dスタジアム・選手・ゴールネット・カメラワーク・紙吹雪
+    characters.js     2種のキャラクター（3️⃣ブロック / 1️⃣スタイリッシュ）と利き足の蹴りモーション
+    stadium.js        3Dスタジアム・4部位の見た目・ゴールネット・カメラワーク・紙吹雪
     textures.js       芝・ネット・ユニフォーム柄・ボール・広告を canvas で生成
-  ui/                 画面ごとの markup（home/country/match/locker/pro/online/misc/layout）
+  ui/                 画面ごとの markup（home/country/match/locker/register/pro/online/misc/layout）
 vendor/three.module.min.js   Three.js r160（CDNではなく同梱・完全オフライン）
 assets/               アイコン全サイズ・エンブレム・国旗・スプラッシュ
 ios/                  Capacitor 8 iOS プロジェクト（StoreKit 2 / 音のブリッジ）
@@ -82,10 +84,14 @@ docs/                 TestFlight 手順書・ワークフロー・プライバ�
 
 - 4方向（TL/TR/BL/BR）。蹴る側＝狙い、止める側＝飛ぶ方向。**同じならセーブ**。
 - **7秒**＋決定ボタン。押した瞬間に両者の手がそろっていれば即結果。
+- **時間切れ**は自動選択ではなく**枠外へ蹴る（MISS KICK）**。キーパーが時間切れなら動けず失点。
+- キッカー↔キーパーの交代時に**1.3秒の説明付きワンクッション**。キーパーは3D上を左右ドラッグで揺さぶれる。
+- キーパー視点は**ゴール全体・相手キッカー・ボールが見える引いた斜め後ろ**（キッカー視点と別カメラ）。
 - 5本ずつ。同点なら6本目からサドンデス（両者が同数を蹴って差がつけば決着）。
 - **早期決着**: 残りの本数で追いつけなくなった時点で試合終了（例 3-0）。
 - CPUはラウンド開始時に方向を確定（後出ししない）。材料は終わった本の履歴だけ。
-- 課金・キット・スパイクで能力や勝率は変わらない（`src/core/skins.js` に強さの値を持たせない）。
+- 課金・キット・4部位・キャラクターで能力や勝率は変わらない（`src/core/skins.js` に強さの値を持たせない）。
+- PRO は **4部位の全種＋2種キャラ（切替可）＋32か国＋世界戦/フレンド戦**。CPU戦・フリー対戦は登録なしで0秒。
 
 ## 3D について
 
@@ -134,4 +140,11 @@ npx cap sync ios            # www → ios/App/App/public
 
 ## バージョン
 
+- v1.0.0 / Build 2（2026-11-26）
+  - アイコンを IPKSF 公式エンブレム（`downloads/shootout4-icon-2-flatball.png`）へ統一（iOS AppIcon 含む）
+  - キャラクター2種（無料=3️⃣ブロック / PRO=1️⃣スタイリッシュ・いつでも切替）と利き足の自然な蹴り
+  - 4部位着せ替え（ユニフォーム/パンツ/靴下/スパイク・無料はホーム/アウェイの2セット）
+  - 32か国（無料16 + PRO16）・IPKSF 公式選手登録（代表国・名前・利き足・チームメイト）
+  - ターン表示の大型化・交代ワンクッション・キーパー視点/左右ドラッグ（通信は100msスロットル）
+  - 時間切れ=MISS KICK（枠外）・結果表記 ⚽ vs 🧤・国えらび下部の見切れ修正・音の底上げと「音をテスト」
 - v1.0.0 / Build 1（2026-11-26）

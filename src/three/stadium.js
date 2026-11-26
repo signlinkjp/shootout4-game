@@ -12,9 +12,13 @@
 
 import * as THREE from '../../vendor/three.module.min.js';
 import { ZONES } from '../core/rules.js';
-import { getKit, getBoot } from '../core/skins.js';
+import { shirtSpec, shortsSpec, socksSpec, bootSpec } from '../core/skins.js';
 import {
-  pitchTexture, netTexture, kitTexture, kitTextureFromSpec, numberTexture,
+  buildCharacter, applyLook, setFooted, poseKick, poseIdle, resetPose,
+  characterStyleFor, disposeCharacter, CHARACTER_STYLES,
+} from './characters.js';
+import {
+  pitchTexture, netTexture, kitTextureFromSpec, numberTexture,
   ballTexture, adTexture, skyTexture, glowTexture, groundTexture,
 } from './textures.js';
 
@@ -23,11 +27,20 @@ const GOAL_Z = -9;
 const GOAL_HALF = 3.66;
 const GOAL_HEIGHT = 2.44;
 const SPOT = new THREE.Vector3(0, 0.12, 2);
+/** キーパーが左右に動ける幅（ゴールポストの内側） */
+export const KEEPER_RANGE = GOAL_HALF - 0.55;
+
+/**
+ * カメラ（役割で明確に分ける）
+ *   shoot … ボールの後ろからゴールを見る（蹴る側）
+ *   keep  … ゴールの斜め後ろ・高めに引いて、ゴール全体と相手キッカーとボールが
+ *           1画面に入る（Build 1 の「近すぎる」を解消）
+ */
 const CAMERAS = {
-  shoot: { pos: new THREE.Vector3(0, 2.95, 6.7), look: new THREE.Vector3(0, 1.15, -7.5) },
-  keep: { pos: new THREE.Vector3(0, 2.0, -9.6), look: new THREE.Vector3(0, 1.3, 4.8) },
-  hero: { pos: new THREE.Vector3(11.5, 7.4, 13.5), look: new THREE.Vector3(0, 1.4, -5) },
-  lineup: { pos: new THREE.Vector3(-4.7, 2.45, 8.1), look: new THREE.Vector3(-4.5, 1.05, 3.7) },
+  shoot: { pos: new THREE.Vector3(0, 3.3, 7.6), look: new THREE.Vector3(0, 1.2, -7.4), fov: 52 },
+  keep: { pos: new THREE.Vector3(5.2, 5.0, -22.0), look: new THREE.Vector3(0, 0.6, -5.0), fov: 60 },
+  hero: { pos: new THREE.Vector3(11.5, 7.4, 13.5), look: new THREE.Vector3(0, 1.4, -5), fov: 52 },
+  lineup: { pos: new THREE.Vector3(-4.7, 2.45, 8.1), look: new THREE.Vector3(-4.5, 1.05, 3.7), fov: 52 },
 };
 
 const SKIN_TONES = ['#dcae87', '#b97e56', '#8a5a3b', '#f0c9a0', '#6b4327', '#c98d63'];
@@ -502,6 +515,26 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
    * 選手
    * ------------------------------------------------------------------ */
 
+  /* ------------------------------------------------------------------ *\
+   * 状態（選手を作る前に用意する）
+   * ------------------------------------------------------------------ */
+
+  const state = {
+    night,
+    role: 'shoot',
+    style: 'voxel',
+    footed: 'right',
+    keeperFooted: 'right',
+    keeperOffset: 0,
+    remoteKeeperOffset: 0,
+    activeKicker: 0,
+    busy: false,
+    netWave: { t: 0, x: 0, y: 0, energy: 0 },
+    celebration: 0,
+    shake: 0,
+    cameraBase: CAMERAS.shoot,
+  };
+
   const textureCache = new Map();
   function cacheTexture(key, factory) {
     if (!textureCache.has(key)) {
@@ -513,171 +546,113 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     return textureCache.get(key);
   }
 
-  const bootGeometry = {
-    classic: new THREE.BoxGeometry(0.15, 0.1, 0.31),
-    speed: new THREE.BoxGeometry(0.14, 0.085, 0.33),
-    high: new THREE.BoxGeometry(0.16, 0.13, 0.3),
+  /* ------------------------------------------------------------------ *\
+   * 選手（2種類のキャラクター・4部位の見た目）
+   * ------------------------------------------------------------------ */
+
+  const skin = {
+    shirt: 'chalk-home',
+    shorts: 'navy-shorts',
+    socks: 'white-socks',
+    boots: 'classic-black',
+  };
+  const look = {
+    style: 'voxel',
+    footed: 'right',
+    oppFooted: 'right',
+    oppShirt: { design: 'solid', primary: '#c8102e', secondary: '#ffffff', accent: '#f2c24b', number: '#ffffff' },
+    oppShorts: { color: '#c8102e', trim: '#ffffff' },
+    oppSocks: { color: '#ffffff', band: '#c8102e' },
   };
 
-  function buildPlayer({ keeper = false, tone = 0 } = {}) {
-    const group = new THREE.Group();
-    const parts = {};
-
-    const shirt = new THREE.MeshStandardMaterial({ roughness: 0.74, metalness: 0.02 });
-    const shorts = new THREE.MeshStandardMaterial({ roughness: 0.82 });
-    const socks = new THREE.MeshStandardMaterial({ roughness: 0.86 });
-    const skin = new THREE.MeshStandardMaterial({ color: SKIN_TONES[tone % SKIN_TONES.length], roughness: 0.72 });
-    const boots = new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.12 });
-    const gloves = new THREE.MeshStandardMaterial({ color: 0xf7fbfd, roughness: 0.55 });
-    const numbers = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
-
-    /* 胴（ジャージ） */
-    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.245, 0.58, 22, 1, false), shirt);
-    torso.position.y = 1.14;
-    torso.castShadow = true;
-    group.add(torso);
-    parts.torso = torso;
-
-    /* 肩 */
-    [-1, 1].forEach((side) => {
-      const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.082, 14, 10), shirt);
-      shoulder.position.set(side * 0.178, 1.39, 0);
-      shoulder.scale.set(1, 0.86, 0.92);
-      group.add(shoulder);
-    });
-
-    /* 首・頭 */
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.09, 10), skin);
-    neck.position.y = 1.46;
-    group.add(neck);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.105, 20, 16), skin);
-    head.position.y = 1.54;
-    head.scale.set(0.94, 1.05, 1);
-    head.castShadow = true;
-    group.add(head);
-    parts.head = head;
-    const hair = new THREE.Mesh(
-      new THREE.SphereGeometry(0.108, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
-      new THREE.MeshStandardMaterial({ color: 0x191f27, roughness: 0.95 }),
-    );
-    hair.position.y = 1.556;
-    group.add(hair);
-
-    /* 腕 */
-    parts.arms = [];
-    [-1, 1].forEach((side) => {
-      const arm = new THREE.Group();
-      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.055, 0.17, 10), shirt);
-      sleeve.position.y = -0.06;
-      arm.add(sleeve);
-      const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.044, 0.4, 10), skin);
-      forearm.position.y = -0.3;
-      arm.add(forearm);
-      arm.position.set(side * 0.245, 1.37, 0);
-      arm.rotation.z = side * (keeper ? 1.15 : 0.14);
-      arm.rotation.x = keeper ? -0.22 : 0.1;
-      group.add(arm);
-      parts.arms.push(arm);
-      if (keeper) {
-        const glove = new THREE.Mesh(new THREE.SphereGeometry(0.082, 14, 10), gloves);
-        glove.scale.set(1, 1.2, 0.66);
-        glove.position.y = -0.52;
-        arm.add(glove);
-      }
-    });
-
-    /* パンツ */
-    const shortsMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.225, 0.25, 0.28, 20), shorts);
-    shortsMesh.position.y = 0.82;
-    shortsMesh.castShadow = true;
-    group.add(shortsMesh);
-    parts.shorts = shortsMesh;
-
-    /* 脚・ソックス・スパイク */
-    parts.legs = [];
-    [-1, 1].forEach((side) => {
-      const leg = new THREE.Group();
-      const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.082, 0.07, 0.4, 12), skin);
-      thigh.position.y = 0.5;
-      leg.add(thigh);
-      const sock = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.05, 0.4, 12), socks);
-      sock.position.y = 0.2;
-      leg.add(sock);
-      const boot = new THREE.Mesh(bootGeometry.classic, boots);
-      boot.position.set(0, 0.045, 0.06);
-      boot.castShadow = true;
-      leg.add(boot);
-      parts[side > 0 ? 'bootR' : 'bootL'] = boot;
-      leg.position.set(side * 0.1, 0, 0);
-      group.add(leg);
-      parts.legs.push(leg);
-    });
-
-    /* 背番号 */
-    const number = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.26), numbers);
-    number.position.set(0, 1.2, 0.243);
-    number.rotation.y = Math.PI;
-    group.add(number);
-    parts.number = number;
-
-    /* 影 */
-    const shadow = new THREE.Mesh(
-      new THREE.CircleGeometry(0.26, 18),
-      new THREE.MeshBasicMaterial({ color: 0x05200f, transparent: true, opacity: 0.35, depthWrite: false }),
-    );
-    shadow.rotation.x = -Math.PI / 2;
-    shadow.position.y = 0.012;
-    group.add(shadow);
-
-    group.userData.parts = parts;
-    group.userData.materials = { shirt, shorts, socks, skin, boots, numbers };
-    return group;
-  }
-
-  function applyKit(group, { kitId, bootId, number, fallbackSpec = null }) {
-    const materials = group.userData.materials;
-    const kit = fallbackSpec ? null : getKit(kitId);
-    const boot = getBoot(bootId);
-    const map = fallbackSpec
-      ? cacheTexture(`spec:${kitId}`, () => kitTextureFromSpec(fallbackSpec))
-      : cacheTexture(`kit:${kit.id}`, () => kitTexture(kit.id));
-    materials.shirt.map = map;
-    materials.shirt.needsUpdate = true;
-    if (kit) {
-      materials.shorts.color.set(kit.shorts);
-      materials.socks.color.set(kit.socks);
-    } else if (fallbackSpec) {
-      materials.shorts.color.set(fallbackSpec.primary);
-      materials.socks.color.set(fallbackSpec.secondary);
-    }
-    materials.boots.color.set(boot.color);
-    materials.numbers.map = cacheTexture(`num:${number}:${kitId}`, () => numberTexture(number, kit ? kit.id : '__fallback__'));
-    materials.numbers.needsUpdate = true;
-    const parts = group.userData.parts;
-    const geometry = bootGeometry[boot.shape] || bootGeometry.classic;
-    [parts.bootL, parts.bootR].forEach((mesh) => {
-      if (mesh) mesh.geometry = geometry;
+  /** 仕様（純粋データ）から1人ぶんの見た目を当てる */
+  function applySpecLook(group, { number, shirt, shorts, socks, boot, key }) {
+    const shirtMap = cacheTexture(`shirt:${key}`, () => kitTextureFromSpec(shirt));
+    const numberMap = cacheTexture(`num:${key}:${number}`, () => numberTexture(number, shirt));
+    applyLook(group, {
+      shirtMap,
+      numberMap,
+      shirt: { number: shirt.number },
+      shorts,
+      socks,
+      boot,
     });
   }
+
+  function myLook(number) {
+    return {
+      number,
+      shirt: shirtSpec(skin.shirt),
+      shorts: shortsSpec(skin.shorts),
+      socks: socksSpec(skin.socks),
+      boot: bootSpec(skin.boots),
+      key: `my:${skin.shirt}:${skin.shorts}:${skin.socks}`,
+    };
+  }
+
+  const GK_SPEC = Object.freeze({
+    design: 'solid', primary: '#2fe08a', secondary: '#0d1b2a', accent: '#0d1b2a', number: '#0d1b2a',
+  });
 
   /* 5人のキッカー（左側に控える）と、蹴る1人 */
   const kickers = [];
   const slots = [
     { x: -7.0, z: 4.3 }, { x: -5.75, z: 4.15 }, { x: -4.5, z: 4.0 }, { x: -3.3, z: 3.9 }, { x: -2.15, z: 3.8 },
   ];
-  slots.forEach((slot, index) => {
-    const player = buildPlayer({ tone: index });
-    player.position.set(slot.x, 0, slot.z);
-    player.rotation.y = Math.PI * 0.92;
-    player.userData.slot = slot;
-    scene.add(player);
-    kickers.push(player);
-  });
+  /* 助走の開始と、ボールの真横（軸足を置く位置）。右利きは左から、左利きは右から */
+  const SHOOT_START = { x: 1.2, z: 3.4 };
+  const SHOOT_BALL = { x: 0.55, z: 2.55 };
 
-  const keeper = buildPlayer({ keeper: true, tone: 2 });
-  keeper.position.set(0, 0, GOAL_Z + 0.85);
-  keeper.userData.home = keeper.position.clone();
-  scene.add(keeper);
+  function buildKickers(style) {
+    kickers.forEach((player) => {
+      scene.remove(player);
+      disposeCharacter(player);
+    });
+    kickers.length = 0;
+    slots.forEach((slot, index) => {
+      const player = buildCharacter({ style, tone: index, footed: 'right' });
+      player.position.set(slot.x, 0, slot.z);
+      player.rotation.y = Math.PI * 0.92;
+      player.userData.slot = slot;
+      scene.add(player);
+      kickers.push(player);
+    });
+  }
+
+  function buildKeeper(style) {
+    const next = buildCharacter({ style, keeper: true, tone: 2 });
+    next.position.set(keeperBase.x + state.keeperOffset * KEEPER_RANGE, 0, keeperBase.z);
+    next.userData.home = keeperBase.clone();
+    scene.add(next);
+    return next;
+  }
+
+  const keeperBase = new THREE.Vector3(0, 0, GOAL_Z + 0.85);
+
+  buildKickers(look.style);
+  let keeper = buildKeeper(look.style);
+
+  /**
+   * キャラクターの種類を切り替える（PRO で 1️⃣ スタイリッシュ）。
+   * 選手の能力には一切影響しない（見た目だけ）。
+   */
+  function setStyle(style) {
+    const next = style === 'stylized' ? 'stylized' : 'voxel';
+    if (next === look.style) return;
+    look.style = next;
+    const shooterIndex = state.activeKicker;
+    const shooterPos = kickers[shooterIndex] ? kickers[shooterIndex].position.clone() : null;
+    const keeperWasVisible = keeper.visible;
+    scene.remove(keeper);
+    disposeCharacter(keeper);
+    buildKickers(next);
+    keeper = buildKeeper(next);
+    keeper.visible = keeperWasVisible;
+    refreshKits();
+    if (shooterPos && kickers[shooterIndex]) {
+      kickers[shooterIndex].position.copy(shooterPos);
+    }
+  }
 
   /* ------------------------------------------------------------------ *\
    * 紙吹雪・衝撃波
@@ -718,26 +693,22 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
    * 状態・カメラ
    * ------------------------------------------------------------------ */
 
-  const state = {
-    night,
-    role: 'shoot',
-    myKit: 'chalk',
-    myBoot: 'classic-black',
-    myNumber: 1,
-    oppColors: { primary: '#c8102e', secondary: '#ffffff', accent: '#f2c24b' },
-    activeKicker: 0,
-    busy: false,
-    netWave: { t: 0, x: 0, y: 0, energy: 0 },
-    celebration: 0,
-    shake: 0,
-    cameraBase: CAMERAS.shoot,
-  };
+
+  function applyFov(preset) {
+    const base = CAMERAS[preset] || CAMERAS.shoot;
+    const aspect = camera.aspect || 0.5;
+    /* 縦長の画面では横が狭い。キーパー視点はゴール全体が入るよう画角を広げる */
+    const widen = aspect < 0.85 ? (preset === 'keep' ? 1.16 : 1.07) : 1;
+    camera.fov = base.fov * widen;
+    camera.updateProjectionMatrix();
+  }
 
   function setCameraNow(preset) {
     const base = CAMERAS[preset] || CAMERAS.shoot;
     camera.position.copy(base.pos);
     camera.lookAt(base.look);
     currentLook.copy(base.look);
+    applyFov(preset);
   }
 
   function moveCamera({ pos, look, duration = 520, ease = easeInOut }) {
@@ -758,18 +729,48 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
   function setRole(role) {
     state.role = role === 'keep' ? 'keep' : 'shoot';
     state.cameraBase = state.role === 'keep' ? CAMERAS.keep : CAMERAS.shoot;
+    applyFov(state.role);
     moveCamera({ pos: state.cameraBase.pos, look: state.cameraBase.look, duration: 460 });
+    placeKeeper();
   }
 
-  function setTeams({ myKit, myBoot, myNumber = 1, oppCountry }) {
-    if (myKit) state.myKit = myKit;
-    if (myBoot) state.myBoot = myBoot;
+  /**
+   * 見た目の設定（4部位 + キャラクターの種類 + 利き足）。
+   * ここに入る値はすべて「見た目」。能力・確率には触らない。
+   */
+  function setTeams({ skin: nextSkin, entitled, myNumber = 1, oppCountry, footed, opponentFooted }) {
+    if (nextSkin) {
+      skin.shirt = nextSkin.shirt || skin.shirt;
+      skin.shorts = nextSkin.shorts || skin.shorts;
+      skin.socks = nextSkin.socks || skin.socks;
+      skin.boots = nextSkin.boots || skin.boots;
+    }
     if (myNumber) state.myNumber = myNumber;
-    if (oppCountry) state.oppColors = oppCountry;
-    paintCrowd([
-      parseInt(String(state.oppColors.primary).replace('#', ''), 16),
-      parseInt(String(state.oppColors.secondary).replace('#', ''), 16),
-    ].filter((value) => Number.isFinite(value) && value >= 0));
+    if (oppCountry) {
+      look.oppShirt = {
+        design: 'solid',
+        primary: oppCountry.primary,
+        secondary: oppCountry.secondary,
+        accent: oppCountry.accent,
+        number: oppCountry.secondary,
+      };
+      look.oppShorts = { color: oppCountry.primary, trim: oppCountry.secondary };
+      look.oppSocks = { color: oppCountry.secondary, band: oppCountry.primary };
+      paintCrowd([
+        parseInt(String(oppCountry.primary).replace('#', ''), 16),
+        parseInt(String(oppCountry.secondary).replace('#', ''), 16),
+      ].filter((value) => Number.isFinite(value) && value >= 0));
+    }
+    if (footed) look.footed = footed === 'left' ? 'left' : 'right';
+    if (opponentFooted) look.oppFooted = opponentFooted === 'left' ? 'left' : 'right';
+    state.keeperFooted = look.oppFooted;
+    /* PRO でも「3️⃣ ブロック / 1️⃣ スタイリッシュ」を選べる（未加入はブロック固定） */
+    const chosen = nextSkin && CHARACTER_STYLES.includes(nextSkin.character)
+      ? nextSkin.character
+      : state.style;
+    const style = entitled === true ? chosen : characterStyleFor(false);
+    state.style = style;
+    setStyle(style);
     refreshKits();
   }
 
@@ -778,37 +779,60 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     kickers.forEach((player, index) => {
       const number = index + 1;
       if (attackingIsMe) {
-        applyKit(player, { kitId: state.myKit, bootId: state.myBoot, number });
+        applySpecLook(player, myLook(number));
+        setFooted(player, look.footed);
       } else {
-        applyKit(player, {
-          kitId: `opp:${state.oppColors.primary}:${state.oppColors.secondary}`,
-          bootId: 'classic-black',
+        /* 相手（CPU）はラウンドごとに利き足が変わる */
+
+        applySpecLook(player, {
           number,
-          fallbackSpec: {
-            design: 'stripes',
-            primary: state.oppColors.primary,
-            secondary: state.oppColors.secondary,
-            accent: state.oppColors.accent,
-            shorts: state.oppColors.primary,
-            socks: state.oppColors.secondary,
-            number: state.oppColors.secondary,
-          },
+          shirt: look.oppShirt,
+          shorts: look.oppShorts,
+          socks: look.oppSocks,
+          boot: { shape: 'classic', color: '#14181f', sole: '#c9ced8' },
+          key: `opp:${look.oppShirt.primary}:${look.oppShirt.secondary}`,
         });
+        setFooted(player, look.oppFooted);
       }
     });
     if (attackingIsMe) {
-      applyKit(keeper, {
-        kitId: `gk:${state.oppColors.accent}`,
-        bootId: 'classic-black',
+      applySpecLook(keeper, {
         number: 1,
-        fallbackSpec: {
-          design: 'solid', primary: '#2fe08a', secondary: '#0d1b2a',
-          accent: '#0d1b2a', shorts: '#0d1b2a', socks: '#2fe08a', number: '#0d1b2a',
-        },
+        shirt: GK_SPEC,
+        shorts: { color: '#0d1b2a', trim: '#2fe08a' },
+        socks: { color: '#2fe08a', band: '#0d1b2a' },
+        boot: { shape: 'classic', color: '#14181f', sole: '#c9ced8' },
+        key: 'gk',
       });
     } else {
-      applyKit(keeper, { kitId: state.myKit, bootId: state.myBoot, number: 1 });
+      applySpecLook(keeper, myLook(1));
+      setFooted(keeper, look.footed);
     }
+  }
+
+  /* ------------------------------------------------------------------ *\
+   * キーパーの左右（駆け引き）
+   * ------------------------------------------------------------------ */
+
+  function placeKeeper() {
+    const offset = state.role === 'keep' ? state.keeperOffset : state.remoteKeeperOffset;
+    keeper.position.x = keeperBase.x + offset * KEEPER_RANGE;
+  }
+
+  /** 自分のキーパーを左右へ（-1〜1）。決定（4択）とは別物。 */
+  function setKeeperOffset(value) {
+    const next = Math.max(-1, Math.min(1, Number(value) || 0));
+    state.keeperOffset = next;
+    if (state.role === 'keep' && !state.busy) placeKeeper();
+    return next;
+  }
+
+  /** 通信相手のキーパーの左右位置（自分が蹴る番のときに見える） */
+  function setRemoteKeeperOffset(value) {
+    const next = Math.max(-1, Math.min(1, Number(value) || 0));
+    state.remoteKeeperOffset = next;
+    if (state.role === 'shoot' && !state.busy) placeKeeper();
+    return next;
   }
 
   /* ------------------------------------------------------------------ *\
@@ -818,17 +842,20 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
   let flight = null;
   let dive = null;
   let resolveKick = null;
+  let shotApproach = false;
 
   function resetPositions() {
     kickers.forEach((player, index) => {
       const slot = slots[index];
       player.position.set(slot.x, 0, slot.z);
       player.rotation.set(0, Math.PI * 0.92, 0);
-      player.userData.parts.legs.forEach((leg) => { leg.rotation.x = 0; });
+      resetPose(player);
     });
     keeper.position.copy(keeper.userData.home);
+    keeper.position.x = keeperBase.x + (state.role === 'keep' ? state.keeperOffset : state.remoteKeeperOffset) * KEEPER_RANGE;
     keeper.rotation.set(0, 0, 0);
     keeper.visible = true;
+    resetPose(keeper);
     ball.position.copy(SPOT);
     ball.rotation.set(0, 0, 0);
     ballShadow.position.set(SPOT.x, 0.014, SPOT.z);
@@ -841,17 +868,25 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     state.busy = false;
   }
 
-  function prepareKick({ kicker = 1, role = 'shoot', shot }) {
+  function prepareKick({ kicker = 1, role = 'shoot', footed }) {
     resetPositions();
     state.activeKicker = Math.min(4, Math.max(0, kicker - 1));
     state.role = role;
+    if (footed) {
+      if (role === 'shoot') look.footed = footed === 'left' ? 'left' : 'right';
+      else look.oppFooted = footed === 'left' ? 'left' : 'right';
+    }
     refreshKits();
     const shooter = kickers[state.activeKicker];
-    shooter.position.set(-0.82, 0, 3.25);
-    shooter.rotation.set(0, Math.PI * 0.95, 0);
+    const kickFoot = role === 'shoot' ? look.footed : look.oppFooted;
+    /* 右利きはボールの左から、左利きは右から助走する（軸足が自然に残る向き） */
+    const side = kickFoot === 'left' ? 1 : -1;
+    shooter.position.set(side * SHOOT_START.x, 0, SHOOT_START.z);
+    shooter.rotation.set(0, Math.PI * (kickFoot === 'left' ? 0.05 : 0.95), 0);
     state.cameraBase = role === 'keep' ? CAMERAS.keep : CAMERAS.shoot;
+    applyFov(role === 'keep' ? 'keep' : 'shoot');
     moveCamera({ pos: state.cameraBase.pos, look: state.cameraBase.look, duration: 420 });
-    void shot;
+    void footed;
   }
 
   function startConfetti(origin) {
@@ -898,39 +933,52 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     if (!alive) confetti.visible = false;
   }
 
-  function kick({ shot = 'TL', save = 'BR', goal = true, kicker = 1, role = 'shoot', onImpact } = {}) {
+  /**
+   * 1本のキック。shot は 'TL' などの4方向か、時間切れの 'OUT'（枠外）。
+   * footed は蹴る選手の利き足（モーションだけに使う）。
+   */
+  function kick({ shot = 'TL', save = 'BR', goal = true, kicker = 1, role = 'shoot', footed, onImpact } = {}) {
     if (state.busy) return Promise.resolve(false);
     state.busy = true;
-    prepareKick({ kicker, role, shot });
+    prepareKick({ kicker, role, footed });
 
-    const shotPoint = zonePoint(shot);
-    const savePoint = zonePoint(save);
-    const target = new THREE.Vector3(shotPoint.x, shotPoint.y, GOAL_Z + 0.4);
+    const miss = shot === 'OUT';
+    const shotPoint = zonePoint(miss ? (role === 'shoot' ? 'TR' : 'TL') : shot);
+    const savePoint = zonePoint(save === 'CENTER' ? 'TL' : save);
+    /* 枠外はゴールの外（クロスバーの上・ポストの外）へ飛ばす */
+    const target = miss
+      ? new THREE.Vector3((shotPoint.x >= 0 ? 1 : -1) * (GOAL_HALF + 1.6), GOAL_HEIGHT + 1.5, GOAL_Z + 0.2)
+      : new THREE.Vector3(shotPoint.x, shotPoint.y, GOAL_Z + 0.4);
 
     flight = {
       startTime: performance.now(),
       runUp: 300,
       flightTime: 520,
       start: new THREE.Vector3(SPOT.x, SPOT.y, SPOT.z),
-      control: new THREE.Vector3(shotPoint.x * 0.4, 1.85, -2.4),
+      control: new THREE.Vector3(target.x * 0.4, 2.5, -2.4),
       end: target,
       keeperTarget: new THREE.Vector3(savePoint.x, savePoint.y, GOAL_Z + 0.85),
       goal,
+      miss,
       onImpact,
       impacted: false,
       kicked: false,
     };
+    shotApproach = true;
+
+    const footSide = (role === 'shoot' ? look.footed : look.oppFooted) === 'left' ? 1 : -1;
 
     if (role === 'shoot') {
       moveCamera({
-        pos: new THREE.Vector3(-0.9, 2.6, 7.6),
+        pos: new THREE.Vector3(footSide * -0.85, 2.9, 8.0),
         look: new THREE.Vector3(shotPoint.x * 0.7, 1.35, GOAL_Z + 0.5),
         duration: 300 + 520,
       });
     } else {
+      /* キーパー視点は引いたまま。ボールの行き先へ少しだけ寄る */
       moveCamera({
-        pos: new THREE.Vector3(0, 2.05, -9.55),
-        look: new THREE.Vector3(shotPoint.x * 0.4, 1.3, 3),
+        pos: new THREE.Vector3(footSide * 4.8, 4.4, -21.5),
+        look: new THREE.Vector3(shotPoint.x * 0.5, 1.25, 1.5),
         duration: 300 + 520,
       });
     }
@@ -978,18 +1026,20 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     const elapsed = now - flight.startTime;
     const shooter = kickers[state.activeKicker];
 
-    if (elapsed < flight.runUp) {
-      const p = elapsed / flight.runUp;
-      shooter.position.z = lerp(3.25, 2.35, easeOutCubic(p));
-      shooter.position.x = lerp(-0.82, -0.4, p);
-      shooter.rotation.y = Math.PI * 0.95;
-      const swing = Math.sin(p * Math.PI) * 0.65;
-      shooter.userData.parts.legs[1].rotation.x = -swing;
-      return;
+    const footSide = (state.role === 'shoot' ? look.footed : look.oppFooted) === 'left' ? 1 : -1;
+    const startX = footSide * SHOOT_START.x;
+    const endX = footSide * SHOOT_BALL.x;
+    const pose = Math.min(1, elapsed / (flight.runUp + 260));
+    poseKick(shooter, pose);
+
+    if ((elapsed < flight.runUp || !flight.kicked) && shotApproach) {
+      const p = Math.min(1, elapsed / flight.runUp);
+      shooter.position.z = lerp(SHOOT_START.z, SHOOT_BALL.z, easeOutCubic(p));
+      shooter.position.x = lerp(startX, endX, p);
+      shooter.rotation.y = Math.PI * (footSide === 1 ? 0.05 : 0.95);
     }
     if (!flight.kicked) {
       flight.kicked = true;
-      shooter.userData.parts.legs[1].rotation.x = -1.15;
       if (flight.onImpact) flight.onImpact('kick');
     }
 
@@ -1027,7 +1077,10 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
 
     if (t >= 1) {
       flight.impacted = true;
-      if (flight.goal) {
+      if (flight.miss) {
+        /* 枠外: そのまま外へ抜けていく */
+        ball.position.copy(flight.end);
+      } else if (flight.goal) {
         ball.position.z = GOAL_Z - 0.85;
         ball.position.y = Math.max(0.12, flight.end.y - 0.35);
       } else {
@@ -1035,8 +1088,14 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
         ball.position.x = flight.keeperTarget.x * 0.9;
         ball.position.y = Math.max(0.15, flight.keeperTarget.y * 0.55);
       }
-      impact(flight.goal);
-      if (flight.onImpact) flight.onImpact(flight.goal ? 'goal' : 'save');
+      if (!flight.miss) impact(flight.goal);
+      else {
+        state.celebration = 0;
+        state.shake = 0.2;
+      }
+      if (flight.onImpact) {
+        flight.onImpact(flight.miss ? 'miss' : (flight.goal ? 'goal' : 'save'));
+      }
       setTimeout(() => {
         const done = resolveKick;
         resolveKick = null;
@@ -1061,12 +1120,13 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
   function animateKickers(time) {
     kickers.forEach((player, index) => {
       if (player === kickers[state.activeKicker] && state.busy) return;
-      player.position.y = Math.sin(time * 1.7 + index * 0.9) * 0.012;
-      player.rotation.z = Math.sin(time * 1.2 + index * 1.7) * 0.012;
+      poseIdle(player, time, index);
     });
     if (!state.busy && !dive) {
       keeper.position.y = Math.sin(time * 1.9) * 0.012;
       keeper.rotation.z = Math.sin(time * 1.5) * 0.025;
+      /* 左右の駆け引き位置は保ったまま、小さく揺れる */
+      placeKeeper();
       keeper.userData.parts.arms.forEach((arm, index) => {
         arm.rotation.z = (index ? 1 : -1) * (1.15 + Math.sin(time * 2.2) * 0.06);
       });
@@ -1126,7 +1186,7 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     const height = canvas.clientHeight || 300;
     renderer.setSize(width, height, false);
     camera.aspect = width / Math.max(1, height);
-    camera.fov = camera.aspect < 0.85 ? 56 : 52;
+    applyFov(state.role === 'keep' ? 'keep' : 'shoot');
     camera.updateProjectionMatrix();
   }
 
@@ -1215,6 +1275,9 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     renderer,
     setRole,
     setTeams,
+    setStyle,
+    setKeeperOffset,
+    setRemoteKeeperOffset,
     setNight,
     setHeroCamera,
     debugHide(what) {
@@ -1233,19 +1296,34 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     dispose,
     state,
     snapshot() {
+      const keeperDistance = Number(camera.position.distanceTo(keeper.position).toFixed(2));
       return {
         available: true,
         night: state.night,
         role: state.role,
+        style: state.style,
+        footed: look.footed,
+        oppFooted: look.oppFooted,
+        keeperFooted: state.keeperFooted,
         busy: state.busy,
         ball: ball.position.toArray().map((v) => Number(v.toFixed(2))),
         camera: camera.position.toArray().map((v) => Number(v.toFixed(2))),
+        cameraFov: Number(camera.fov.toFixed(1)),
+        keeper: keeper.position.toArray().map((v) => Number(v.toFixed(2))),
+        keeperOffset: state.keeperOffset,
+        remoteKeeperOffset: state.remoteKeeperOffset,
+        keeperDistance,
         crowd: crowdPoints.length,
         kickers: kickers.length,
-        kit: state.myKit,
-        boot: state.myBoot,
+        kit: { ...skin },
+        skin: { ...skin },
         confetti: confetti.visible,
         netEnergy: Number(state.netWave.energy.toFixed(2)),
+        meshes: (() => {
+          let count = 0;
+          scene.traverse((object) => { if (object.isMesh) count += 1; });
+          return count;
+        })(),
       };
     },
   };

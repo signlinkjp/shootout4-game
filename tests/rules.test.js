@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  DIRECTIONS, newMatch, resolveKick, kickerNumber, phase, decidedWinner, pkBoard,
+  DIRECTIONS, MISS, PICKABLE, isPick, newMatch, resolveKick, kickerNumber, phase, decidedWinner, pkBoard,
   validateOnlineKick, validateStamp, randomDirection, winRate, MAX_TOTAL_KICKS,
 } from '../src/core/rules.js';
 
@@ -29,7 +29,7 @@ test('交互に蹴り、state を書き換えない', () => {
   assert.equal(two.kicks.opp.length, 1);
 });
 
-test('キッカー番号は 1→5、サドンデスは6本目で1に戻る', () => {
+test('キッカー番号は 1→5、サドンデスも1番から順に回る', () => {
   let state = newMatch();
   const seen = [];
   /* 互いに1本ずつ決め続けて 5-5 → 6-6（決着しない） */
@@ -37,8 +37,8 @@ test('キッカー番号は 1→5、サドンデスは6本目で1に戻る', () 
     seen.push(kickerNumber(state));
     state = kick(state, 'TL', 'BR');
   }
-  assert.deepEqual(seen, [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6]);
-  assert.equal(kickerNumber(state, 'opp'), 1, '7本目は1人目に戻る');
+  assert.deepEqual(seen, [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 1, 1]);
+  assert.equal(kickerNumber(state, 'opp'), 2, '相手の7本目は2人目');
 });
 
 test('5本ずつ終えて同点ならサドンデス、両者が蹴って差がつけば決着', () => {
@@ -111,7 +111,7 @@ test('勝敗が決まった試合には追加できない・不正な方向は�
   }
   assert.equal(state.winner, 'opp');
   assert.throws(() => kick(state, 'TL', 'BR'), /match finished/);
-  assert.throws(() => kick(newMatch(), 'XX', 'TL'), /invalid direction/);
+  assert.throws(() => kick(newMatch(), 'XX', 'TL'), /invalid shot/);
   assert.throws(() => newMatch({ first: 'ref' }), /invalid first/);
 });
 
@@ -132,6 +132,33 @@ test('PKスコアボード: 5本＋サドンデスの並びと現在の位置', 
   assert.equal(after.opp[5].current, true, '次は相手の6本目');
 });
 
+test('時間切れ=枠外（MISS）: 必ず外れ、キッカーは点を取らない', () => {
+  assert.equal(MISS, 'OUT');
+  assert.equal(isPick(MISS), true);
+  assert.equal(isPick('CENTER'), false);
+  assert.deepEqual([...PICKABLE], ['TL', 'TR', 'BL', 'BR', 'OUT']);
+  for (const save of DIRECTIONS) {
+    const next = resolveKick(newMatch(), { shot: MISS, save, timeout: true });
+    const event = next.history[0];
+    assert.equal(event.goal, false);
+    assert.equal(event.miss, true);
+    assert.equal(event.save, null);
+    assert.equal(event.timeout, true);
+    assert.equal(next.score.me, 0);
+    assert.equal(next.turn, 'opp', '外しても1本ぶんは消費して交代する');
+  }
+});
+
+test('キーパーが時間切れ（stuck）: 動けず相手のシュートが入る', () => {
+  let state = newMatch();
+  state = resolveKick(state, { shot: 'TL', save: 'TL' }); /* 自分が蹴って止められる */
+  const next = resolveKick(state, { shot: 'BR', save: null, stuck: true, timeout: true });
+  const event = next.history[1];
+  assert.equal(event.goal, true);
+  assert.equal(event.stuck, true);
+  assert.equal(next.score.opp, 1);
+});
+
 test('タイムアップの自動選択は4方向のみ・偏らない', () => {
   const counts = Object.fromEntries(DIRECTIONS.map((dir) => [dir, 0]));
   for (let i = 0; i < 400; i += 1) counts[randomDirection()] += 1;
@@ -143,6 +170,7 @@ test('通信の検証: 自分の手・重複・範囲外・不正方向を捨て
   assert.equal(validateOnlineKick({ from: 'a', round: 0, dir: 'TL' }, { self: 'me', seen }).ok, true);
   assert.equal(validateOnlineKick({ from: 'me', round: 0, dir: 'TL' }, { self: 'me', seen }).ok, false);
   assert.equal(validateOnlineKick({ from: 'a', round: 0, dir: 'XX' }, { self: 'me', seen }).ok, false);
+  assert.equal(validateOnlineKick({ from: 'a', round: 0, dir: MISS }, { self: 'me', seen }).ok, true);
   assert.equal(validateOnlineKick({ from: 'a', round: -1, dir: 'TL' }, { self: 'me', seen }).ok, false);
   assert.equal(validateOnlineKick({ from: 'a', round: MAX_TOTAL_KICKS, dir: 'TL' }, { self: 'me', seen }).ok, false);
   assert.equal(validateOnlineKick({ from: 'a', round: 0, dir: 'TL', pad: 'x'.repeat(600) }, { self: 'me', seen }).ok, false);

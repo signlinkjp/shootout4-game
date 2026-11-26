@@ -2,7 +2,7 @@
 
 import { CONFIG } from '../config.js';
 import { countryName, getCountry } from '../core/countries.js';
-import { brandMark, emblem, flag, icon, esc } from './layout.js';
+import { emblem, flag, icon, esc } from './layout.js';
 
 export function homeView({ t, prefs, record, entitled, language }) {
   const me = getCountry(prefs.country);
@@ -42,15 +42,6 @@ export function homeView({ t, prefs, record, entitled, language }) {
       </button>
     </div>
 
-    ${entitled ? '' : `<button class="procard" data-action="pro">
-      <span class="procard__emblem">${emblem('procard__img')}</span>
-      <span class="procard__body">
-        <b>${esc(t('proTitle'))}</b>
-        <small>${esc(t('proBenefitRank'))} · ${esc(t('proPrice'))}</small>
-      </span>
-      <span class="procard__price">${esc(CONFIG.iap.proPrice)}</span>
-    </button>`}
-
     <nav class="menu-grid">
       ${menu.map(([action, iconName, label, sub]) => `<button class="menu" data-action="${action}">
         ${icon(iconName, 'menu__icon')}
@@ -58,6 +49,22 @@ export function homeView({ t, prefs, record, entitled, language }) {
         ${sub ? `<span class="menu__sub">${esc(sub)}</span>` : ''}
       </button>`).join('')}
     </nav>
+
+    ${entitled ? `<button class="procard procard--member" data-action="pro" data-testid="procard">
+      <span class="procard__emblem">${emblem('procard__img')}</span>
+      <span class="procard__body">
+        <b>${esc(t('proTitle'))}</b>
+        <small>${esc(t('proHomeNote'))}</small>
+      </span>
+      <span class="procard__price">✓</span>
+    </button>` : `<button class="procard" data-action="pro" data-testid="procard">
+      <span class="procard__emblem">${emblem('procard__img')}</span>
+      <span class="procard__body">
+        <b>${esc(t('proTitle'))}</b>
+        <small>${esc(t('proHomeNote'))}</small>
+      </span>
+      <span class="procard__price">${esc(CONFIG.iap.proPrice)}</span>
+    </button>`}
 
     <footer class="home__foot">
       <span>V${CONFIG.version} · BUILD ${CONFIG.build}</span>

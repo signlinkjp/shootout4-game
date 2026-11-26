@@ -8,13 +8,20 @@
 import { CONFIG } from './config.js';
 import { tr, detectLanguage, LANGUAGES, LANGUAGE_NAMES, isLanguage } from './i18n.js';
 import {
-  DIRECTIONS, newMatch, resolveKick, kickerNumber, phase, randomDirection, winRate,
+  DIRECTIONS, MISS, newMatch, resolveKick, kickerNumber, phase, randomDirection, winRate,
 } from './core/rules.js';
 import { chooseCPU } from './core/cpu.js';
-import { COUNTRIES, getCountry, pickOpponent, countryName } from './core/countries.js';
 import {
-  KITS, BOOTS, DEFAULT_SKIN, normalizeSkin, readSkin, saveSkin, isKitUnlocked, isBootUnlocked,
+  COUNTRIES, getCountry, pickOpponent, countryName, isCountryUnlocked,
+} from './core/countries.js';
+import {
+  DEFAULT_SKIN, normalizeSkin, readSkin, saveSkin, effectiveSkin, isPartUnlocked,
+  isCharacterUnlocked, getCharacter,
 } from './core/skins.js';
+import {
+  DEFAULT_REGISTRATION, readRegistration, writeRegistration, normalizeRegistration, isRegistered,
+  playerFor, cpuPlayer, officialCountry, registrationSummary,
+} from './core/registration.js';
 import {
   openStorage, loadPrefs, savePrefs, loadRecord, saveRecord, addResult, EMPTY_RECORD,
   TEXT_SIZES, SIZE_SCALE,
@@ -22,7 +29,7 @@ import {
 import {
   unlockAudio, configureAudio, click, select as selectSound, whistle, kickSound, netSound,
   gloveSound, goalRoar, saveGroan, countdownTick, startCrowd, stopCrowd, crowdSurge,
-  openingCrowd, audioState, uiSwitch, purchaseChime,
+  openingCrowd, audioState, uiSwitch, purchaseChime, testSound,
 } from './audio.js';
 import {
   initialEntitlement, refreshEntitlement, purchase, restore, loadPrice, clearEntitlement,
@@ -37,6 +44,7 @@ import { homeView } from './ui/home.js';
 import { countryView } from './ui/country.js';
 import { matchView, resultView, pkCellList } from './ui/match.js';
 import { lockerView } from './ui/locker.js';
+import { registerView } from './ui/register.js';
 import { proView } from './ui/pro.js';
 import { onlineView, rankView } from './ui/online.js';
 import { settingsView, statsView, rulesView, privacyView, openingView } from './ui/misc.js';
@@ -52,8 +60,13 @@ const deviceLanguages = (typeof navigator !== 'undefined' && (navigator.language
 let prefs = loadPrefs(storage, deviceLanguages);
 let record = loadRecord(storage);
 let entitled = initialEntitlement();
-let skin = readSkin(storage);
-if (!prefs.opponent) prefs.opponent = pickOpponent(prefs.country).code;
+let skin = effectiveSkin(readSkin(storage), entitled);
+let registration = readRegistration(storage);
+let registerDraft = { ...registration, teammates: registration.teammates.map((item) => ({ ...item })) };
+let registerNext = 'locker';
+let registerBack = 'locker';
+let handoverTimer = null;
+if (!prefs.opponent) prefs.opponent = pickOpponent(prefs.country, Math.random, { entitled }).code;
 
 let screen = 'home';
 let draft = { ...skin };
@@ -90,28 +103,53 @@ function persist() {
  * 画面
  * ------------------------------------------------------------------ */
 
+/**
+ * 表示用のキッカー情報（名前・利き足・背番号）。
+ * 自分は公式選手登録の内容、CPU はラウンドごとに利き足が変わる。
+ */
+function kickerInfo(side, number, round = 0) {
+  if (side === 'me') {
+    return playerFor(registration, number, { countryLabel: countryName(prefs.country, prefs.language) });
+  }
+  return cpuPlayer(round, number, {
+    countryLabel: countryName(prefs.opponent || 'BR', prefs.language),
+    seed: `${prefs.opponent || 'BR'}:${officialCountry(registration, prefs.country)}`,
+  });
+}
+
 function currentView() {
   switch (screen) {
     case 'home':
       return homeView({ t, prefs, record, entitled, language: prefs.language });
     case 'country':
-      return countryView({ t, prefs, language: prefs.language });
+      return countryView({ t, prefs, entitled, language: prefs.language });
     case 'match':
-      return matchView({ t, prefs, state: match.state, language: prefs.language, online: Boolean(match.online), roomLabel: match.online ? online.code : '' });
+      return matchView({
+        t, prefs, state: match.state, language: prefs.language,
+        online: Boolean(match.online), roomLabel: match.online ? online.code : '',
+        kickerFor: kickerInfo,
+      });
     case 'result':
-      return resultView({ t, state: match.state, record, language: prefs.language, prefs, online: Boolean(match.online) });
+      return resultView({
+        t, state: match.state, record, language: prefs.language, prefs,
+        online: Boolean(match.online), kickerFor: kickerInfo,
+      });
     case 'locker':
-      return lockerView({ t, entitled, draft, language: prefs.language });
+      return lockerView({
+        t, entitled, draft, language: prefs.language, registered: isRegistered(registration),
+      });
+    case 'register':
+      return registerView({ t, draft: registerDraft, prefs, language: prefs.language, back: registerBack });
     case 'pro':
       return proView({ t, entitled, language: prefs.language, diagnostic: proDiagState, price: proPrice });
     case 'online':
-      return onlineView({ t, entitled, language: prefs.language, state: online });
+      return onlineView({ t, entitled, language: prefs.language, state: online, registered: isRegistered(registration), officialCountry: officialCountry(registration, prefs.country) });
     case 'rank':
       return rankView({ t, table: rankTable(rankRows, myRankRow()), entitled, language: prefs.language, status: rankStatus });
     case 'stats':
       return statsView({ t, record });
     case 'settings':
-      return settingsView({ t, prefs, entitled });
+      return settingsView({ t, prefs, entitled, registered: isRegistered(registration) });
     case 'rules':
       return rulesView({ t });
     case 'privacy':
@@ -127,8 +165,10 @@ function render() {
   if (screen === 'match') {
     updateTimer(CONFIG.roundSeconds * 1000, CONFIG.roundSeconds * 1000);
     attachStage();
+    attachKeeperDrag();
     updateBoard();
     updateHud();
+    updateKeeperControls();
   }
   document.documentElement.dataset.screen = screen;
   const body = $('.screen__body');
@@ -161,15 +201,37 @@ function attachStage() {
     stadium = null;
     return;
   }
+  stadium.setNight(prefs.night);
+  updateStadiumTeams();
+  prepareStadiumKick();
+}
+
+function attackingSide() {
+  return match && match.state.turn === 'me' ? 'me' : 'opp';
+}
+
+/** 4部位 + キャラクター + 両チームの利き足を3Dへ渡す（すべて見た目だけ） */
+function updateStadiumTeams() {
+  if (!stadium || !match) return;
+  const round = match.state.history.length;
   stadium.setTeams({
-    myKit: skin.kit,
-    myBoot: skin.boot,
+    skin: effectiveSkin(skin, entitled),
+    entitled,
     myNumber: kickerNumber(match.state, 'me'),
     oppCountry: getCountry(prefs.opponent || 'BR').kit,
+    footed: kickerInfo('me', kickerNumber(match.state, 'me'), round).foot,
+    opponentFooted: kickerInfo('opp', kickerNumber(match.state, 'opp'), round).foot,
   });
-  stadium.setNight(prefs.night);
-  stadium.setRole(currentRole());
-  stadium.prepareKick({ kicker: kickerNumber(match.state, match.state.turn === 'me' ? 'me' : 'opp'), role: currentRole() });
+}
+
+function prepareStadiumKick() {
+  if (!stadium || !match) return;
+  const side = attackingSide();
+  const round = match.state.history.length;
+  const number = kickerNumber(match.state, side);
+  const role = currentRole();
+  stadium.setRole(role);
+  stadium.prepareKick({ kicker: number, role, footed: kickerInfo(side, number, round).foot });
 }
 
 function disposeStadium() {
@@ -204,6 +266,9 @@ function startMatch({ onlineMatch = false } = {}) {
     applied: 0,
     nextTimer: null,
     waitingOpponent: false,
+    lastRole: null,
+    handover: false,
+    keeperX: 0,
     startedAt: performance.now(),
   };
   screen = 'match';
@@ -228,11 +293,26 @@ function beginRound() {
   match.role = role;
   const kicker = kickerNumber(state, role === 'shoot' ? 'me' : 'opp');
   const roleChip = $('#role-chip');
-  if (roleChip) roleChip.textContent = role === 'shoot' ? t('shootTitle') : t('saveTitle');
+  if (roleChip) {
+    /* 大きなターン表示（⚽/🧤 + 文言）は子要素を保ったまま差し替える */
+    roleChip.dataset.role = role;
+    roleChip.classList.toggle('turn--shoot', role === 'shoot');
+    roleChip.classList.toggle('turn--keep', role === 'keep');
+    const dot = roleChip.querySelector('.turn__dot');
+    const label = roleChip.querySelector('.turn__text');
+    if (dot) dot.textContent = role === 'shoot' ? '⚽' : '🧤';
+    if (label) label.textContent = t(role === 'shoot' ? 'turnShootBig' : 'turnKeepBig');
+  }
   const kickerChip = $('#kicker-chip');
   if (kickerChip) kickerChip.textContent = `${t('kicker')} ${kicker}`;
   const status = $('#kick-status');
   if (status) status.textContent = '';
+  match.keeperX = 0;
+  match.opponentKeeperX = 0;
+  if (stadium) {
+    stadium.setKeeperOffset(0);
+    stadium.setRemoteKeeperOffset(0);
+  }
   const banner = $('#banner');
   if (banner) { banner.hidden = true; banner.className = 'banner'; }
   const nextBtn = $('#next-kick');
@@ -248,20 +328,71 @@ function beginRound() {
   if (timer) timer.classList.remove('is-urgent');
 
   if (stadium) {
-    stadium.setTeams({
-      myKit: skin.kit,
-      myBoot: skin.boot,
-      myNumber: kickerNumber(state, 'me'),
-      oppCountry: getCountry(prefs.opponent || 'BR').kit,
-    });
-    stadium.setRole(role);
-    stadium.prepareKick({ kicker, role });
+    updateStadiumTeams();
+    prepareStadiumKick();
+  }
+  const side = role === 'shoot' ? 'me' : 'opp';
+  const foot = kickerInfo(side, kickerNumber(state, side), state.history.length).foot;
+  if (kickerChip) {
+    kickerChip.textContent = `${t('kicker')} ${kickerNumber(state, side)} · ${kickerInfo(side, kickerNumber(state, side), state.history.length).name} · ${t(foot === 'left' ? 'footLeft' : 'footRight')}`;
   }
   whistle();
   startCrowd(getCountry(prefs.country));
-  startTimer();
+
+  /* キッカー↔キーパーの交代時に、説明付きのワンクッション（1.3秒） */
+  const first = match.lastRole == null;
+  const switched = match.lastRole != null && match.lastRole !== role;
+  match.lastRole = role;
+  match.handover = first || switched;
+  clearTimeout(handoverTimer);
+  if (match.handover) {
+    showHandover(role, { first });
+    handoverTimer = setTimeout(() => {
+      if (!match) return;
+      match.handover = false;
+      hideHandover();
+      updateKeeperControls();
+      startTimer();
+    }, CONFIG.handoverMs);
+  } else {
+    hideHandover();
+    startTimer();
+  }
+  updateKeeperControls();
   updateHud();
   updateBoard();
+}
+
+/** 交代のワンクッション（大きな文字で「次はあなたがキーパーです」） */
+function showHandover(role, { first = false } = {}) {
+  const overlay = $('#handover');
+  const icon = $('#handover-icon');
+  const title = $('#handover-title');
+  const hint = $('#handover-hint');
+  if (!overlay) return;
+  if (icon) icon.textContent = role === 'shoot' ? '⚽' : '🧤';
+  if (title) title.textContent = first
+    ? t(role === 'shoot' ? 'turnShootBig' : 'turnKeepBig')
+    : t(role === 'shoot' ? 'handoverShoot' : 'handoverKeep');
+  if (hint) hint.textContent = t(role === 'shoot' ? 'handoverShootHint' : 'handoverKeepHint');
+  if (match) match.lastHandover = { role, first, title: title ? title.textContent : '' };
+  overlay.hidden = false;
+  overlay.classList.add('is-show');
+}
+
+function hideHandover() {
+  const overlay = $('#handover');
+  if (!overlay) return;
+  overlay.classList.remove('is-show');
+  overlay.hidden = true;
+}
+
+/** キーパーの番だけ、3D画面の上に「左右に動かせる」領域を出す */
+function updateKeeperControls() {
+  const zone = $('#keeper-zone');
+  if (!zone) return;
+  const active = Boolean(match && match.role === 'keep' && !match.confirmed && !match.handover);
+  zone.hidden = !active;
 }
 
 function startTimer() {
@@ -300,6 +431,9 @@ function stopRound() {
   if (match) cancelAnimationFrame(match.timerId);
   clearTimeout(nextTimer);
   nextTimer = null;
+  clearTimeout(handoverTimer);
+  handoverTimer = null;
+  hideHandover();
 }
 
 function selectDirection(dir) {
@@ -315,12 +449,13 @@ function selectDirection(dir) {
   selectSound();
 }
 
-function showBanner(goal) {
+function showBanner(kind) {
   const banner = $('#banner');
   if (!banner) return;
+  const miss = kind === 'miss';
   banner.hidden = false;
-  banner.textContent = t(goal ? 'goal' : 'save');
-  banner.className = `banner is-show ${goal ? 'is-goal' : 'is-save'}`;
+  banner.textContent = miss ? t('missKick') : t(kind === 'goal' ? 'goal' : 'save');
+  banner.className = `banner is-show ${miss ? 'is-miss' : kind === 'goal' ? 'is-goal' : 'is-save'}`;
 }
 
 function setKickStatus(text, kind = '') {
@@ -335,21 +470,64 @@ function confirmKick() {
   resolveRound(match.selection, { timeout: false });
 }
 
+/**
+ * 7秒たっても決めていなければ、自動で選ばない。
+ * 蹴る番なら枠外へ（MISS KICK）、キーパーの番なら動けず失点。
+ */
 function autoPick() {
   if (!match || match.confirmed) return;
-  const dir = match.selection || randomDirection();
-  if (!match.selection) selectDirection(dir);
-  resolveRound(dir, { timeout: true });
+  resolveRound(match.selection || null, { timeout: true });
+}
+
+/** 3D画面のキーパーを左右に動かす（止める方向の決定とは別の駆け引き） */
+function setKeeperFromClientX(clientX) {
+  const stage = $('#stage');
+  if (!stage || !stadium || !match || match.role !== 'keep' || match.confirmed) return;
+  const rect = stage.getBoundingClientRect();
+  const ratio = ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+  const value = Math.max(-1, Math.min(1, ratio));
+  match.keeperX = value;
+  stadium.setKeeperOffset(value);
+  if (match.online && session) session.sendKeeper(value);
+}
+
+function attachKeeperDrag() {
+  const zone = $('#keeper-zone');
+  if (!zone) return;
+  let dragging = false;
+  zone.addEventListener('pointerdown', (event) => {
+    if (!match || match.role !== 'keep' || match.confirmed) return;
+    dragging = true;
+    zone.setPointerCapture?.(event.pointerId);
+    setKeeperFromClientX(event.clientX);
+    event.preventDefault();
+  });
+  zone.addEventListener('pointermove', (event) => {
+    if (!dragging) return;
+    setKeeperFromClientX(event.clientX);
+    event.preventDefault();
+  });
+  const end = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    if (match && match.online && session) session.sendKeeper(match.keeperX, { force: true });
+    zone.releasePointerCapture?.(event.pointerId);
+  };
+  zone.addEventListener('pointerup', end);
+  zone.addEventListener('pointercancel', end);
 }
 
 function resolveRound(dir, { timeout }) {
   if (!match || match.confirmed) return;
   match.confirmed = true;
   cancelAnimationFrame(match.timerId);
+  hideHandover();
+  updateKeeperControls();
   $('#confirm') && ($('#confirm').disabled = true);
   $$('.zone').forEach((button) => { button.disabled = true; });
   updateTimer(0, CONFIG.roundSeconds * 1000);
 
+  const role = match.role || currentRole();
   if (match.online) {
     if (!session || !session.matchName) {
       toast(t('connectionError'));
@@ -358,7 +536,9 @@ function resolveRound(dir, { timeout }) {
     setKickStatus(t('waitingOpponent'));
     match.waitingOpponent = true;
     const round = match.state.history.length;
-    const sent = session.pick(round, dir, { timeout });
+    /* 時間切れ: 蹴る番なら枠外（OUT）。キーパーなら相手の手に任せる */
+    const pick = dir || (role === 'shoot' ? MISS : randomDirection());
+    const sent = session.pick(round, pick, { timeout });
     if (!sent) {
       /* すでに相手の手が届いていて、この端末では解決済みの可能性 */
       setKickStatus('');
@@ -366,41 +546,48 @@ function resolveRound(dir, { timeout }) {
     return;
   }
 
-  const role = match.role || currentRole();
-  const shot = role === 'shoot' ? dir : match.cpuDir;
-  const save = role === 'shoot' ? match.cpuDir : dir;
-  applyKick(shot, save, { timeout });
+  if (role === 'shoot') {
+    /* 時間切れは枠外へ蹴る（自動でコースを選ばない） */
+    const shot = dir || (timeout ? MISS : randomDirection());
+    applyKick(shot, match.cpuDir, { timeout });
+  } else {
+    /* キーパーが時間切れ: 動けず、相手のシュートは入る */
+    applyKick(match.cpuDir, dir, { timeout, stuck: timeout && !dir });
+  }
 }
 
-function applyKick(shot, save, { timeout = false } = {}) {
+function applyKick(shot, save, { timeout = false, stuck = false } = {}) {
   if (!match) return;
   const round = match.state.history.length;
   if (match.applied > round) return;
-  const next = resolveKick(match.state, { shot, save });
+  const next = resolveKick(match.state, { shot, save, timeout, stuck });
   match.state = next;
   match.applied = next.history.length;
   const event = next.history.at(-1);
   const role = match.role || currentRole();
+  const foot = kickerInfo(event.side, event.kicker, event.index).foot;
 
   match.selection = null;
   match.confirmed = true;
   updateHud();
   updateBoard();
   markReveal(event, role);
-  if (timeout) setKickStatus(t('timeoutPick'));
+  if (timeout) setKickStatus(t(event.miss ? 'timeoutMiss' : event.stuck ? 'timeoutStuck' : 'timeoutMiss'));
 
   let animation = null;
   if (stadium) {
     animation = stadium.kick({
       shot: event.shot,
-      save: event.save,
+      save: event.save || 'CENTER',
       goal: event.goal,
       kicker: event.kicker,
       role,
+      footed: foot,
       onImpact: (kind) => {
         if (kind === 'kick') kickSound();
         if (kind === 'goal') { netSound(); goalRoar(2.4); crowdSurge(1.1); }
         if (kind === 'save') { gloveSound(); saveGroan(); }
+        if (kind === 'miss') { gloveSound(); saveGroan(); }
       },
     });
   } else {
@@ -411,7 +598,8 @@ function applyKick(shot, save, { timeout = false } = {}) {
     }, 260);
   }
 
-  setTimeout(() => showBanner(event.goal), stadium ? 780 : 320);
+  const bannerKind = event.miss ? 'miss' : (event.goal ? 'goal' : 'save');
+  setTimeout(() => showBanner(bannerKind), stadium ? 780 : 320);
 
   const token = next.history.length;
   const finish = () => {
@@ -428,6 +616,10 @@ function applyKick(shot, save, { timeout = false } = {}) {
 function markReveal(event, role) {
   $$('.zone').forEach((button) => {
     const dir = button.dataset.dir;
+    if (event.miss) {
+      if (dir === event.save) button.classList.add('is-cpu');
+      return;
+    }
     if (event.goal) {
       if (dir === event.shot) button.classList.add('is-selected');
     } else {
@@ -437,8 +629,8 @@ function markReveal(event, role) {
   });
   const status = $('#kick-status');
   if (status) {
-    const shotName = t(`zone_${event.shot}`);
-    const saveName = t(`zone_${event.save}`);
+    const shotName = event.miss ? t('outOfFrame') : t(`zone_${event.shot}`);
+    const saveName = event.stuck ? t('noDive') : t(`zone_${event.save}`);
     status.textContent = role === 'shoot'
       ? `${t('you')}: ${shotName} / ${t('opponent')}: ${saveName}`
       : `${t('opponent')}: ${shotName} / ${t('you')}: ${saveName}`;
@@ -515,7 +707,10 @@ function updateHud() {
   const kickerChip = $('#kicker-chip');
   if (kickerChip) {
     const role = currentRole();
-    kickerChip.textContent = `${t('kicker')} ${kickerNumber(match.state, role === 'shoot' ? 'me' : 'opp')}`;
+    const side = role === 'shoot' ? 'me' : 'opp';
+    const number = kickerNumber(match.state, side);
+    const info = kickerInfo(side, number, match.state.history.length);
+    kickerChip.textContent = `${t('kicker')} ${number} · ${info.name} · ${t(info.foot === 'left' ? 'footLeft' : 'footRight')}`;
   }
 }
 
@@ -544,8 +739,9 @@ function ensureSession() {
 
 function onlineProfile() {
   return {
-    nickname: (prefs.nickname || 'PLAYER').slice(0, 12),
-    countryCode: prefs.country,
+    nickname: (prefs.nickname || registration.userName || registration.teamName || 'PLAYER').slice(0, 12),
+    /* 世界戦・世界ランキングは登録した代表国で戦う（国内・フリーは普段の国） */
+    countryCode: online.scope === 'world' ? officialCountry(registration, prefs.country) : prefs.country,
     pro: entitled,
     level: prefs.level,
   };
@@ -580,7 +776,13 @@ function handleOnlineEvent(event) {
       if (match && match.online) {
         match.role = event.shooterSide === 'me' ? 'shoot' : 'keep';
         match.waitingOpponent = false;
-        applyKick(event.shot, event.save);
+        applyKick(event.shot, event.save, { stuck: Boolean(event.stuck) });
+      }
+      break;
+    case 'opponent-keeper':
+      if (match && match.online && stadium) {
+        match.opponentKeeperX = event.x;
+        stadium.setRemoteKeeperOffset(event.x);
       }
       break;
     case 'stamp':
@@ -636,7 +838,7 @@ function openQuick() {
     return;
   }
   ensureSession();
-  session.quickMatch({ scope: online.scope, country: prefs.country, profile: onlineProfile() });
+  session.quickMatch({ scope: online.scope, country: onlineProfile().countryCode, profile: onlineProfile() });
   online.searching = true;
   online.opponent = null;
   online.status = '';
@@ -711,10 +913,11 @@ function leaveOnlineMatch() {
 }
 
 function myRankRow() {
+  const country = officialCountry(registration, prefs.country);
   return {
     id: rankId(),
-    nickname: prefs.nickname || countryName(prefs.country, prefs.language),
-    countryCode: prefs.country,
+    nickname: registration.userName || registration.teamName || prefs.nickname || countryName(country, prefs.language),
+    countryCode: country,
     points: record.points || 0,
     wins: record.onlineWins || 0,
     losses: record.onlineLosses || 0,
@@ -770,6 +973,7 @@ async function buyPro() {
   const result = await purchase();
   if (result.status === 'success') {
     entitled = true;
+    skin = effectiveSkin(skin, entitled);
     proStatus = t('proMember');
     purchaseChime(true);
     render();
@@ -787,6 +991,7 @@ async function buyPro() {
 async function restorePro() {
   const result = await restore();
   entitled = result.status === 'restored' ? true : entitled;
+  skin = effectiveSkin(skin, entitled);
   proStatus = result.status === 'restored' ? t('proRestored') : t('proNothing');
   proDiagState = iapDiagnostic();
   purchaseChime(result.status === 'restored');
@@ -808,6 +1013,7 @@ function updatePrefs(patch, { rerender = true } = {}) {
 function saveLocker() {
   try {
     skin = saveSkin(storage, entitled, draft);
+    draft = { ...skin };
     const status = $('#locker-status');
     if (status) status.textContent = t('saved');
     toast(t('saved'));
@@ -816,6 +1022,49 @@ function saveLocker() {
     const status = $('#locker-status');
     if (status) status.textContent = t('proLocked');
   }
+}
+
+/* ------------------------------------------------------------------ *\
+ * 選手登録
+ * ------------------------------------------------------------------ */
+
+function openRegister({ next = 'locker', back = null, world = false } = {}) {
+  registerDraft = {
+    ...registration,
+    teammates: registration.teammates.map((item) => ({ ...item })),
+  };
+  if (!registerDraft.userName) registerDraft.userName = prefs.nickname || '';
+  if (!registerDraft.language) registerDraft.language = prefs.language;
+  registerNext = next;
+  registerBack = back || (screen === 'settings' ? 'settings' : 'locker');
+  if (world) toast(t('registerForWorld'));
+  go('register');
+}
+
+function saveRegistration() {
+  const next = normalizeRegistration(registerDraft);
+  const status = $('#register-status');
+  if (!next.userName.trim()) {
+    if (status) status.textContent = t('registerRequired');
+    return;
+  }
+  registration = writeRegistration(storage, next);
+  registerDraft = { ...registration, teammates: registration.teammates.map((item) => ({ ...item })) };
+  if (registration.language && registration.language !== prefs.language) {
+    prefs = { ...prefs, language: registration.language };
+    persist();
+    applyTheme();
+  }
+  if (registration.country && !isCountryUnlocked(prefs.country, entitled)) {
+    prefs = { ...prefs, country: registration.country };
+    persist();
+  }
+  toast(t('registerSaved'));
+  selectSound();
+  const back = registerNext === 'online' ? 'online' : registerBack;
+  registerNext = 'locker';
+  go(back);
+  render();
 }
 
 /* ------------------------------------------------------------------ *\
@@ -931,7 +1180,10 @@ async function boot() {
 
 function localizeCountryName() {
   if (!COUNTRIES.some((country) => country.code === prefs.country)) prefs.country = 'JP';
+  if (!isCountryUnlocked(prefs.country, entitled)) prefs.country = 'JP';
   if (!COUNTRIES.some((country) => country.code === prefs.opponent)) prefs.opponent = 'BR';
+  if (!isCountryUnlocked(prefs.opponent, entitled)) prefs.opponent = pickOpponent(prefs.country, Math.random, { entitled }).code;
+  if (!isCountryUnlocked(prefs.opponent, entitled)) prefs.opponent = 'BR';
 }
 
 function modelReady() {
@@ -956,18 +1208,37 @@ app.addEventListener('click', async (event) => {
     showStamp(stamp.dataset.stamp);
     return;
   }
-  const kitTile = event.target.closest('button[data-kit]');
-  if (kitTile && !kitTile.dataset.action) {
-    draft = normalizeSkin({ ...draft, kit: kitTile.dataset.kit });
+  const footButton = event.target.closest('button[data-foot]');
+  if (footButton) {
+    const player = Number(footButton.dataset.regPlayer);
+    const foot = footButton.dataset.foot === 'left' ? 'left' : 'right';
+    if (player === 1) {
+      registerDraft.foot = foot;
+    } else if (registerDraft.teammates[player - 2]) {
+      registerDraft.teammates[player - 2] = { ...registerDraft.teammates[player - 2], foot };
+    }
     selectSound();
     render();
     return;
   }
-  const bootTile = event.target.closest('button[data-boot]');
-  if (bootTile && !bootTile.dataset.action) {
-    draft = normalizeSkin({ ...draft, boot: bootTile.dataset.boot });
-    selectSound();
-    render();
+  const partTile = event.target.closest('button[data-part]');
+  if (partTile && !partTile.dataset.action) {
+    const part = partTile.dataset.part;
+    if (part && isPartUnlocked(part, partTile.dataset.item, entitled)) {
+      draft = normalizeSkin({ ...draft, [part]: partTile.dataset.item });
+      selectSound();
+      render();
+    }
+    return;
+  }
+  const characterTile = event.target.closest('button[data-character]');
+  if (characterTile && !characterTile.dataset.action) {
+    const id = characterTile.dataset.character;
+    if (isCharacterUnlocked(id, entitled)) {
+      draft = normalizeSkin({ ...draft, character: getCharacter(id).id });
+      selectSound();
+      render();
+    }
     return;
   }
   const levelButton = event.target.closest('button[data-level]');
@@ -1003,15 +1274,25 @@ app.addEventListener('click', async (event) => {
   const myCountry = event.target.closest('button[data-mycountry]');
   if (myCountry) {
     const code = myCountry.dataset.mycountry;
+    if (!isCountryUnlocked(code, entitled)) {
+      toast(t('proLocked'));
+      go('pro');
+      return;
+    }
     const patch = { country: code };
-    if (prefs.opponent === code) patch.opponent = pickOpponent(code).code;
+    if (prefs.opponent === code) patch.opponent = pickOpponent(code, Math.random, { entitled }).code;
     updatePrefs(patch);
-    if (code === 'br') { /* no-op: 国を変えても強さは変えない */ }
     return;
   }
   const opponent = event.target.closest('button[data-opponent]');
   if (opponent) {
-    updatePrefs({ opponent: opponent.dataset.opponent });
+    const code = opponent.dataset.opponent;
+    if (!isCountryUnlocked(code, entitled)) {
+      toast(t('proLocked'));
+      go('pro');
+      return;
+    }
+    updatePrefs({ opponent: code });
     return;
   }
 
@@ -1037,7 +1318,7 @@ app.addEventListener('click', async (event) => {
       startMatch({ onlineMatch: false });
       break;
     case 'random-opponent':
-      updatePrefs({ opponent: pickOpponent(prefs.country).code });
+      updatePrefs({ opponent: pickOpponent(prefs.country, Math.random, { entitled }).code });
       break;
     case 'next':
       nextRound();
@@ -1057,6 +1338,16 @@ app.addEventListener('click', async (event) => {
       break;
     case 'save-skin':
       saveLocker();
+      break;
+    case 'register':
+      openRegister({ next: 'locker' });
+      break;
+    case 'save-registration':
+      saveRegistration();
+      break;
+    case 'sound-test':
+      testSound();
+      toast(t('soundTestDone'));
       break;
     case 'pro':
       proStatus = '';
@@ -1104,6 +1395,8 @@ app.addEventListener('click', async (event) => {
           /* private mode */
         }
         prefs = loadPrefs(storage, deviceLanguages);
+        registration = { ...DEFAULT_REGISTRATION, teammates: DEFAULT_REGISTRATION.teammates.map((item) => ({ ...item })) };
+        registerDraft = { ...registration, teammates: registration.teammates.map((item) => ({ ...item })) };
         skin = { ...DEFAULT_SKIN };
         draft = { ...skin };
         applyTheme();
@@ -1115,9 +1408,17 @@ app.addEventListener('click', async (event) => {
       go('online');
       break;
     case 'quick':
+      if (online.scope === 'world' && !isRegistered(registration)) {
+        openRegister({ next: 'online', world: true });
+        break;
+      }
       openQuick();
       break;
     case 'create-room':
+      if (!isRegistered(registration)) {
+        openRegister({ next: 'online' });
+        break;
+      }
       createRoom();
       break;
     case 'join-room': {
@@ -1153,10 +1454,31 @@ app.addEventListener('click', async (event) => {
 
 /* 設定の select（言語・など） */
 app.addEventListener('change', (event) => {
+  const registrationSelect = event.target.closest('select[data-reg]');
+  if (registrationSelect) {
+    registerDraft[registrationSelect.dataset.reg] = registrationSelect.value;
+    return;
+  }
   const select = event.target.closest('select[data-pref]');
   if (!select) return;
   const key = select.dataset.pref;
   updatePrefs({ [key]: select.value });
+});
+
+/* 選手登録の入力（1行テキストのみ。改行・制御文字は保存時に落とす） */
+app.addEventListener('input', (event) => {
+  const field = event.target.closest('[data-reg]');
+  if (field) {
+    registerDraft[field.dataset.reg] = field.value;
+    return;
+  }
+  const mate = event.target.closest('[data-reg-teammate]');
+  if (mate) {
+    const index = Number(mate.dataset.regTeammate);
+    if (registerDraft.teammates[index]) {
+      registerDraft.teammates[index] = { ...registerDraft.teammates[index], name: mate.value };
+    }
+  }
 });
 
 /* キーボード（1〜4 で方向、Enter で決定） */
@@ -1189,6 +1511,52 @@ window.__SHOOTOUT__ = {
   get prefs() { return { ...prefs }; },
   get record() { return { ...record }; },
   get entitled() { return entitled; },
+  get skin() { return { ...skin }; },
+  get registration() {
+    return registrationSummary(registration, {
+      countryLabel: countryName(registration.country, prefs.language),
+      languageName: prefs.language,
+    });
+  },
+  get registrationRaw() {
+    return { ...registration, teammates: registration.teammates.map((item) => ({ ...item })) };
+  },
+  register: (patch) => {
+    registerDraft = normalizeRegistration({ ...registration, ...patch });
+    saveRegistration();
+    return { ...registration };
+  },
+  openRegister: (options) => openRegister(options || {}),
+  saveRegistration: () => { saveRegistration(); return { ...registration }; },
+  kickerFor: (side, number, round) => kickerInfo(side, number, round),
+  keeperOffset: (x) => {
+    if (!stadium) return 0;
+    stadium.setKeeperOffset(x);
+    if (match) match.keeperX = Number(x) || 0;
+    return stadium.snapshot().keeperOffset;
+  },
+  remoteKeeperOffset: (x) => {
+    if (!stadium) return 0;
+    return stadium.setRemoteKeeperOffset(x);
+  },
+  previewHandover: (role = 'keep') => {
+    showHandover(role === 'keep' ? 'keep' : 'shoot', { first: false });
+    return true;
+  },
+  handover: () => {
+    if (!match) return false;
+    match.handover = false;
+    clearTimeout(handoverTimer);
+    hideHandover();
+    updateKeeperControls();
+    if (!match.deadline || match.deadline - performance.now() < 500) startTimer();
+    return true;
+  },
+  timeoutNow: () => {
+    if (!match || match.confirmed) return false;
+    autoPick();
+    return true;
+  },
   get match() {
     if (!match) return null;
     return {
@@ -1202,6 +1570,11 @@ window.__SHOOTOUT__ = {
       history: match.state.history.length,
       remainingMs: Math.max(0, Math.round((match.deadline || 0) - performance.now())),
       phase: phase(match.state),
+      handover: Boolean(match.handover),
+      lastHandover: match.lastHandover || null,
+      lastEvent: match.state.history.length ? { ...match.state.history.at(-1) } : null,
+      keeperX: match.keeperX || 0,
+      opponentKeeperX: match.opponentKeeperX || 0,
     };
   },
   get audio() { return audioState(); },
@@ -1244,6 +1617,8 @@ window.__SHOOTOUT__ = {
   hold: () => {
     if (!match) return false;
     cancelAnimationFrame(match.timerId);
+    clearTimeout(nextTimer);
+    nextTimer = null;
     match.deadline = performance.now() + 600000;
     return true;
   },
@@ -1251,6 +1626,8 @@ window.__SHOOTOUT__ = {
   languages: LANGUAGES,
   languageNames: LANGUAGE_NAMES,
   countries: COUNTRIES.map((country) => country.code),
+  freeCountries: COUNTRIES.filter((country) => !country.pro).map((country) => country.code),
+  proCountries: COUNTRIES.filter((country) => country.pro).map((country) => country.code),
   productId: PRODUCT_ID,
 };
 

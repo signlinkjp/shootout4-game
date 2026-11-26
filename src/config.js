@@ -9,7 +9,7 @@ export const CONFIG = Object.freeze({
   brand: 'IPKSF',
   federation: 'INTERNATIONAL PENALTY KICK SHOOTOUT FEDERATION',
   version: '1.0.0',
-  build: 1,
+  build: 2,
   bundleId: 'jp.signlink.Shootout4',
 
   iap: {
@@ -34,6 +34,8 @@ export const CONFIG = Object.freeze({
   revealMs: 1800,
   openingMs: 3000,
   cameraMs: 900,
+  /* キッカー↔キーパーの交代ワンクッション（1.2〜1.5秒） */
+  handoverMs: 1300,
 
   /* 画像 */
   icon: 'assets/icon-1024.png',

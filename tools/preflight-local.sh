@@ -19,8 +19,8 @@ python3 - <<'PY'
 import pathlib, re
 countries = pathlib.Path('src/core/countries.js').read_text()
 codes = re.findall(r"code: '([A-Z]{2})'", countries)
-assert len(codes) == 16, codes
-assert len(set(codes)) == 16
+assert len(codes) == 32, codes   # 無料16 + PRO16（ワールドカップ風）
+assert len(set(codes)) == 32
 print('countries:', ' '.join(codes))
 PY
 

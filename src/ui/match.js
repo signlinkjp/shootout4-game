@@ -1,4 +1,4 @@
-/** SHOOTOUT 4 — 試合画面（HUD・PKスコアボード・4択・7秒タイマー） */
+/** SHOOTOUT 4 — 試合画面（HUD・PKスコアボード・4択・7秒タイマー・キーパーの駆け引き） */
 
 import { CONFIG } from '../config.js';
 import { DIRECTIONS, pkBoard, kickerNumber, phase } from '../core/rules.js';
@@ -33,13 +33,22 @@ function roleText(t, role) {
   return role === 'shoot' ? t('shootTitle') : t('saveTitle');
 }
 
-export function matchView({ t, prefs, state, language, online = false, roomLabel = '' }) {
+function turnText(t, role) {
+  return role === 'shoot' ? t('turnShootBig') : t('turnKeepBig');
+}
+
+function footLabel(t, foot) {
+  return foot === 'left' ? t('footLeft') : t('footRight');
+}
+
+export function matchView({ t, prefs, state, language, online = false, roomLabel = '', kickerFor = null }) {
   const me = getCountry(prefs.country);
   const oppCode = prefs.opponent || 'BR';
   const opp = getCountry(oppCode);
   const role = state.turn === 'me' ? 'shoot' : 'keep';
-  const kicker = kickerNumber(state, 'me');
+  const kickerNo = kickerNumber(state, 'me');
   const sudden = phase(state) === 'sudden';
+  const myKicker = kickerFor ? kickerFor('me', kickerNo, state.history.length) : null;
 
   return `<div class="match">
     <header class="hud">
@@ -78,8 +87,23 @@ export function matchView({ t, prefs, state, language, online = false, roomLabel
         <div class="fallback-ball"></div>
       </div>
       <div class="stage__overlay">
-        <span class="chip chip--role" id="role-chip" data-testid="role">${esc(roleText(t, role))}</span>
-        <span class="chip chip--kicker" id="kicker-chip">${esc(t('kicker'))} ${kicker}</span>
+        <div class="turn ${role === 'shoot' ? 'turn--shoot' : 'turn--keep'}" id="role-chip" data-testid="role" data-role="${role}">
+          <span class="turn__dot" aria-hidden="true">${role === 'shoot' ? '⚽' : '🧤'}</span>
+          <b class="turn__text">${esc(turnText(t, role))}</b>
+        </div>
+        <span class="chip chip--kicker" id="kicker-chip" data-testid="kicker">
+          ${esc(t('kicker'))} ${kickerNo}${myKicker ? ` · ${esc(myKicker.name)} · ${esc(footLabel(t, myKicker.foot))}` : ''}
+        </span>
+      </div>
+      <div class="handover" id="handover" hidden data-testid="handover">
+        <div class="handover__card">
+          <span class="handover__icon" id="handover-icon" aria-hidden="true">⚽</span>
+          <b class="handover__title" id="handover-title"></b>
+          <span class="handover__hint" id="handover-hint"></span>
+        </div>
+      </div>
+      <div class="keeper-zone" id="keeper-zone" data-testid="keeper-zone" hidden>
+        <span class="keeper-zone__hint">${esc(t('keeperHint'))}</span>
       </div>
       <div class="banner" id="banner" hidden></div>
       <div class="stage__status" id="kick-status" role="status" aria-live="polite"></div>
@@ -107,13 +131,35 @@ export function matchView({ t, prefs, state, language, online = false, roomLabel
       <button class="stamp stamp--leave" data-action="online-leave">${icon('door')}<small>${esc(t('leaveMatch'))}</small></button>
     </section>` : ''}
 
-    <div class="toast" id="toast" aria-live="polite"></div>
     <div class="stamp-pop" id="stamp-pop" hidden></div>
     ${roomLabel ? `<div class="roomchip">${esc(t('roomCode'))}: <b>${esc(roomLabel)}</b></div>` : ''}
   </div>`;
 }
 
-export function resultView({ t, state, record, language, prefs, online = false }) {
+function logRow({ t, event, index, mine, meCode, oppCode, kickerFor, language }) {
+  const number = event.kicker;
+  const info = kickerFor ? kickerFor(event.side, number, event.index) : null;
+  const shotLabel = event.miss ? t('outOfFrame') : t(`zone_${event.shot}`);
+  const saveLabel = event.stuck ? t('noDive') : t(`zone_${event.save}`);
+  return `<div class="kicklog__row ${event.goal ? 'is-goal' : 'is-miss'}" data-testid="kicklog-${index}">
+    <span class="kicklog__no">${index + 1}${event.phase === 'sudden' ? '<em>SD</em>' : ''}</span>
+    <div class="kicklog__main">
+      <span class="kicklog__who">
+        ${flag(mine ? meCode : oppCode, 'flag flag--xs')}
+        <b>${esc(info ? info.name : `${t('kicker')} ${number}`)}</b>
+        ${info ? `<em class="foot foot--${info.foot}">${esc(footLabel(t, info.foot))}</em>` : ''}
+      </span>
+      <span class="kicklog__dirs">
+        <span class="kicklog__shot" data-testid="kicklog-shot-${index}">⚽ ${esc(shotLabel)}</span>
+        <span class="kicklog__vs">vs</span>
+        <span class="kicklog__save" data-testid="kicklog-save-${index}">🧤 ${esc(saveLabel)}</span>
+        <b class="kicklog__res">${event.goal ? '○' : '×'}</b>
+      </span>
+    </div>
+  </div>`;
+}
+
+export function resultView({ t, state, record, language, prefs, online = false, kickerFor = null }) {
   const me = getCountry(prefs.country);
   const oppCode = prefs.opponent || 'BR';
   const win = state.winner === 'me';
@@ -139,16 +185,20 @@ export function resultView({ t, state, record, language, prefs, online = false }
     </section>
 
     <section class="kicklog" aria-label="${esc(t('matchSummary'))}">
-      ${state.history.map((event, index) => {
-        const mine = event.side === 'me';
-        return `<div class="kicklog__row ${event.goal ? 'is-goal' : 'is-miss'}">
-          <span class="kicklog__no">${index + 1}${event.phase === 'sudden' ? '<em>SD</em>' : ''}</span>
-          ${flag(mine ? me.code : oppCode, 'flag flag--sm')}
-          <span class="kicklog__who">${esc(t('kicker'))} ${event.kicker}</span>
-          <span class="kicklog__dir">${esc(t(`zone_${event.shot}`))} → ${esc(t(`zone_${event.save}`))}</span>
-          <b class="kicklog__res">${event.goal ? '○' : '×'}</b>
-        </div>`;
-      }).join('')}
+      <div class="kicklog__head">
+        <span>⚽ ${esc(t('kickLogShot'))}</span>
+        <span>🧤 ${esc(t('kickLogSave'))}</span>
+      </div>
+      ${state.history.map((event, index) => logRow({
+        t,
+        event,
+        index,
+        mine: event.side === 'me',
+        meCode: me.code,
+        oppCode,
+        kickerFor,
+        language,
+      })).join('')}
     </section>
 
     <div class="statgrid">

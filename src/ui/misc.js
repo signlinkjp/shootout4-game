@@ -37,6 +37,8 @@ export function rulesView({ t }) {
       </section>
       <section class="panel panel--flat">
         <ul class="bulletlist">
+          <li>${esc(t('handoverShootHint'))}</li>
+          <li>${esc(t('keeperHint'))}</li>
           <li>${esc(t('fairness'))}</li>
           <li>${esc(t('rulesFair'))}</li>
           <li>${esc(t('proFair'))}</li>
@@ -71,7 +73,7 @@ export function statsView({ t, record }) {
   });
 }
 
-export function settingsView({ t, prefs, entitled, languages = LANGUAGES, names = LANGUAGE_NAMES }) {
+export function settingsView({ t, prefs, entitled, registered = false, languages = LANGUAGES, names = LANGUAGE_NAMES }) {
   return screenShell({
     title: t('settingsTitle'),
     back: 'home',
@@ -97,6 +99,11 @@ export function settingsView({ t, prefs, entitled, languages = LANGUAGES, names 
             <button class="seg ${prefs.night ? 'is-on' : ''}" data-night="true">${icon('moon')}${esc(t('nightMode'))}</button>
           </div>
         </div>
+      </section>
+
+      <section class="panel">
+        <button class="btn btn--ghost btn--block" data-action="sound-test" data-testid="sound-test">${icon('soundwave')}<span>${esc(t('soundTest'))}</span></button>
+        <button class="btn btn--ghost btn--block" data-action="register" data-testid="settings-register">${icon('id')}<span>${esc(registered ? t('registerDone') : t('registerOpen'))}</span></button>
       </section>
 
       <section class="panel">
