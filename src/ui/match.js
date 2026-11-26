@@ -92,6 +92,7 @@ export function matchView({ t, prefs, state, language, online = false, roomLabel
         <span class="timer__text" id="timer-text">${esc(t('timeLeft'))} ${CONFIG.roundSeconds}s</span>
       </div>
       <div class="zones" role="group" aria-label="${esc(roleText(t, role))}">
+        <!-- 4択ボタン: data-dir="TL" / TR / BL / BR -->
         ${DIRECTIONS.map((dir) => `<button class="zone zone--${dir.toLowerCase()}" data-dir="${dir}" data-testid="zone-${dir}" aria-pressed="false">
           <span>${esc(t(`zone_${dir}`))}</span>
         </button>`).join('')}
