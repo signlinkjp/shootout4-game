@@ -40,7 +40,7 @@ const required = [
   'ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png',
   'ios/App/CapApp-SPM/Package.swift',
   'ios/App/App/capacitor.config.json',
-  'capacitor.config.ts',
+  'capacitor.config.json',
   'package.json',
 ];
 for (const path of required) check(`構成: ${path}`, exists(path));

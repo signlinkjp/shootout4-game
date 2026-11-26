@@ -1,0 +1,13 @@
+{
+  "appId": "jp.signlink.Shootout4",
+  "appName": "SHOOTOUT 4",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#071226",
+    "scrollEnabled": false
+  },
+  "android": {
+    "backgroundColor": "#071226"
+  }
+}
