@@ -185,7 +185,7 @@ jobs:
   testflight:
     name: Xcode で署名 → IPA → TestFlight
     needs: preflight
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     env:
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID || 'TGBNH8WJV6' }}
