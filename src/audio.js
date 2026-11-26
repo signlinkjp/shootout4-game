@@ -22,6 +22,7 @@ const state = {
   settings: { sound: true, bgm: true, vibrate: true },
   country: null,
   unlocked: false,
+  backgrounded: false,
 };
 
 const AC = () => (typeof window === 'undefined' ? null : window.AudioContext || window.webkitAudioContext);
@@ -426,6 +427,48 @@ export function testSound() {
   return ok;
 }
 
+/**
+ * アプリを離れるとき（ホーム画面・他アプリ・ロック）に、鳴っているものを全部止める。
+ *   · BGM・歓声のタイマーを止める
+ *   · 無音の下支え <audio> を止める（Dynamic Island のスピーカー印のため）
+ *   · AudioContext を suspend（音声セッションを握り続けない）
+ * 戻ってきたら resumeFromBackground() で再開する。
+ */
+export function suspendForBackground() {
+  state.backgrounded = true;
+  stopCrowd();
+  stopMusic();
+  try {
+    state.silent?.pause?.();
+  } catch {
+    /* 下支えが無くても止められる */
+  }
+  const ctx = state.ctx;
+  if (ctx && ctx.state === 'running') ctx.suspend().catch(() => {});
+  /* iOS: アプリ側の Audio Session も手放す（Dynamic Island のスピーカー印対策） */
+  const cap = typeof window !== 'undefined' ? window.Capacitor : null;
+  const bridge = cap && cap.Plugins && cap.Plugins.ShootoutAudio;
+  if (bridge && typeof bridge.deactivate === 'function') bridge.deactivate().catch(() => {});
+  return audioState();
+}
+
+export function resumeFromBackground({ crowd = false } = {}) {
+  const wasBackground = state.backgrounded;
+  state.backgrounded = false;
+  const ctx = state.ctx;
+  if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+  if (state.unlocked) {
+    try {
+      state.silent?.play?.().catch(() => {});
+    } catch {
+      /* 下支えが無くても鳴る */
+    }
+  }
+  if (ctx && state.settings.bgm) startMusic();
+  if (wasBackground && crowd && ctx) startCrowd(state.country);
+  return audioState();
+}
+
 /** テスト用: 内部状態（画面を出さずに確認する） */
 export function audioState() {
   return {
@@ -435,5 +478,6 @@ export function audioState() {
     crowd: Boolean(state.crowdSource),
     music: Boolean(state.musicTimer),
     country: state.country ? state.country.code : null,
+    backgrounded: Boolean(state.backgrounded),
   };
 }

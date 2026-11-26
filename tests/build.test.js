@@ -26,20 +26,20 @@ function pngHeader(path) {
   };
 }
 
-test('Build 2 / v1.0.0 に全ファイルのビルド番号が揃っている', () => {
+test('Build 3 / v1.0.0 に全ファイルのビルド番号が揃っている', () => {
   assert.equal(CONFIG.version, '1.0.0');
-  assert.equal(CONFIG.build, 2);
+  assert.equal(CONFIG.build, 3);
 
   const pbx = read('ios/App/App.xcodeproj/project.pbxproj');
   const builds = [...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((match) => match[1]);
-  assert.deepEqual(builds, ['2', '2']);
+  assert.deepEqual(builds, ['3', '3']);
   assert.equal((pbx.match(/MARKETING_VERSION = 1\.0\.0;/g) || []).length, 2);
 
   const pkg = JSON.parse(read('package.json'));
   assert.equal(pkg.version, '1.0.0');
-  assert.match(pkg.description, /Build 2/);
+  assert.match(pkg.description, /Build 3/);
 
-  assert.match(read('src/config.js'), /build: 2/);
+  assert.match(read('src/config.js'), /build: 3/);
   assert.match(read('src/ui/home.js'), /V\$\{CONFIG\.version\} · BUILD \$\{CONFIG\.build\}/);
   assert.match(read('src/ui/misc.js'), /BUILD \$\{CONFIG\.build\}/);
 });
@@ -70,11 +70,11 @@ test('アイコンは IPKSF 公式エンブレムで、iOS と assets が同一�
   }
 });
 
-test('配布用 www/ が作れて、ビルド2のアイコンとコードが同期している', async () => {
+test('配布用 www/ が作れて、ビルド3のアイコンとコードが同期している', async () => {
   await makeWww();
   const wwwIcon = pngHeader('www/assets/icon-1024.png');
   assert.equal(wwwIcon.hash, pngHeader('assets/icon-1024.png').hash);
-  assert.match(read('www/src/config.js'), /build: 2/);
+  assert.match(read('www/src/config.js'), /build: 3/);
   assert.match(read('www/src/three/characters.js'), /buildCharacter/);
   assert.match(read('www/src/core/registration.js'), /IPKSF/);
   for (const path of ['www/index.html', 'www/src/main.js', 'www/src/three/stadium.js', 'www/assets/flags/uy-96.png']) {

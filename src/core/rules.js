@@ -29,6 +29,18 @@ export const ZONES = Object.freeze({
   BR: { x: 0.62, y: 0.18, label: 'rightBottom' },
 });
 
+/**
+ * 左右反転（キーパー視点のため）。
+ *
+ * ゴールの4コースは「キッカーから見た左右」で決めている。キーパーは
+ * ゴールの裏側からキッカーと向かい合うので、画面の左はゴールの右になる。
+ * 画面で押したボタンと飛ぶ方向を一致させるため、キーパーの選択だけを
+ * この関数で反転してからエンジンへ渡す（時間切れの OUT と CENTER はそのまま）。
+ */
+export function mirrorDirection(dir) {
+  return { TL: 'TR', TR: 'TL', BL: 'BR', BR: 'BL' }[dir] || dir;
+}
+
 export function isDirection(value) {
   return DIRECTIONS.includes(value);
 }

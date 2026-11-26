@@ -1,6 +1,6 @@
 # SHOOTOUT 4 — IPKSF World Penalty Championship
 
-iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 2）。
+iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 3）。
 `クイック対戦`・`CPU対戦`・`フレンド対戦`・`世界ランキング`・`ロッカー（キャラクター＋4部位）`・
 `IPKSF 公式加盟（PRO・買い切り ¥300）` を、Capacitor 8 + 素の HTML/CSS/JS（ES Modules）で実装しています。
 
@@ -23,10 +23,10 @@ python3 -m http.server 4173
 ## テスト
 
 ```bash
-npm test                                  # 単体テスト 67件（node --test）
+npm test                                  # 単体テスト 80件（node --test）
 node tools/verify-ios-project.mjs         # iOS プロジェクトの契約チェック 44項目
 bash tools/preflight-local.sh             # CI の preflight と同じガード
-node tools/shots-prod.mjs                 # 実ブラウザ E2E 55項目＋スクリーンショット
+node tools/shots-prod.mjs                 # 実ブラウザ E2E 69項目＋スクリーンショット
 ```
 
 E2E は Chromium（Playwright）で、実際の画面を操作して次を確認します。
@@ -140,6 +140,16 @@ npx cap sync ios            # www → ios/App/App/public
 
 ## バージョン
 
+- v1.0.0 / Build 3（2026-11-27）
+  - ホーム上部のエンブレム枠が文字「特大」で押し潰されて見切れる問題を修正（ヒーロー枠を縮めない）
+  - バックグラウンド移行で BGM・歓声・AudioContext を停止（iOS は `applicationWillResignActive` で Audio Session を解放）。戻ると再開、ラウンドの時計も止まる
+  - プレイ中画面の右上にスピーカー ON/OFF と設定（試合を中断しない簡易設定）を追加
+  - 結果画面の凡例を `⚽ シュート vs 🧤 セーブ` に寄せて表示
+  - ロッカーに先攻/後攻（攻撃順）を追加。PK表は上段=先攻・下段=後攻、左=あなた・右=相手で固定
+  - 戦績を「CPU戦績（リセット可）」と「PRO 通信対戦 通算（リセット対象外）」の2枠に分離
+  - キーパーのダイビングを選んだコース側へ頭と手から飛ぶよう修正（画面の左右反転・倒れる向き・カメラの揺れ・動けないときは飛ばない）
+  - 国えらぶの各横列に「← 横にスクロール →」の案内（12言語）
+  - ロッカー上部を3Dキャラクタープレビュー（斜め正面アップ）に。キャラ名バッジと切り替え時の回転ジャンプ
 - v1.0.0 / Build 2（2026-11-26）
   - アイコンを IPKSF 公式エンブレム（`downloads/shootout4-icon-2-flatball.png`）へ統一（iOS AppIcon 含む）
   - キャラクター2種（無料=3️⃣ブロック / PRO=1️⃣スタイリッシュ・いつでも切替）と利き足の自然な蹴り

@@ -51,11 +51,14 @@ export function rulesView({ t }) {
 export function statsView({ t, record }) {
   const total = record.played || 0;
   const rate = total ? Math.round((record.wins / total) * 100) : 0;
+  const onlineTotal = record.onlinePlayed || 0;
+  const onlineRate = onlineTotal ? Math.round(((record.onlineWins || 0) / onlineTotal) * 100) : 0;
   return screenShell({
     title: t('statsTitle'),
     back: 'home',
     body: `
-      <section class="panel statpanel">
+      <section class="panel statpanel" data-testid="stats-cpu">
+        <div class="section-head"><h2 class="section-title">${esc(t('statsCpu'))}</h2></div>
         <div class="bigrate"><b data-testid="winrate">${rate}%</b><span>${esc(t('winRate'))}</span></div>
         <div class="statgrid">
           <div><span>${esc(t('played'))}</span><b>${record.played}</b></div>
@@ -68,9 +71,50 @@ export function statsView({ t, record }) {
           <div><span>${esc(t('suddenDeath'))}</span><b>${record.sudden}</b></div>
         </div>
       </section>
-      <button class="btn btn--danger btn--block" data-action="reset-record">${esc(t('resetStats'))}</button>
+      <button class="btn btn--danger btn--block" data-action="reset-record" data-testid="reset-record">${esc(t('resetStats'))}</button>
+
+      <section class="panel statpanel statpanel--pro" data-testid="stats-online">
+        <div class="section-head">
+          <h2 class="section-title">${esc(t('statsPro'))}</h2>
+          <span class="stars" aria-hidden="true">★</span>
+        </div>
+        <div class="bigrate bigrate--pro"><b data-testid="online-winrate">${onlineRate}%</b><span>${esc(t('winRate'))}</span></div>
+        <div class="statgrid">
+          <div><span>${esc(t('played'))}</span><b data-testid="online-played">${onlineTotal}</b></div>
+          <div><span>${esc(t('wins'))}</span><b data-testid="online-wins">${record.onlineWins || 0}</b></div>
+          <div><span>${esc(t('losses'))}</span><b data-testid="online-losses">${record.onlineLosses || 0}</b></div>
+          <div><span>${esc(t('streak'))}</span><b>${record.onlineStreak || 0}</b></div>
+          <div><span>${esc(t('goalsScored'))}</span><b>${record.onlineGoals || 0}</b></div>
+          <div><span>${esc(t('goalsAgainst'))}</span><b>${record.onlineConceded || 0}</b></div>
+          <div><span>${esc(t('points'))}</span><b>${record.points || 0}</b></div>
+        </div>
+        <p class="mini">${esc(t('statsProNote'))}</p>
+      </section>
     `,
   });
+}
+
+/** 試合中に開く簡易設定（試合を中断しない） */
+export function quickSettingsView({ t, prefs }) {
+  const row = (key, value) => `<div class="row">
+    <span class="row__label">${esc(t(key))}</span>
+    <div class="segmented" role="group" aria-label="${esc(t(key))}">
+      <button type="button" class="seg ${value ? 'is-on' : ''}" data-quick-toggle="${key}" data-value="true">${esc(t('on'))}</button>
+      <button type="button" class="seg ${value ? '' : 'is-on'}" data-quick-toggle="${key}" data-value="false">${esc(t('off'))}</button>
+    </div>
+  </div>`;
+  return `<div class="modal" data-quick-settings>
+    <div class="modal__card" role="dialog" aria-modal="true" aria-label="${esc(t('settings'))}">
+      <div class="section-head">
+        <b class="section-title">${esc(t('settings'))}</b>
+        <button type="button" class="iconbtn iconbtn--small" data-quick="close" aria-label="${esc(t('close'))}">${icon('close')}</button>
+      </div>
+      ${row('sound', prefs.sound)}
+      ${row('bgm', prefs.bgm)}
+      ${row('vibrate', prefs.vibrate)}
+      <button type="button" class="btn btn--ghost btn--block" data-quick="close">${esc(t('close'))}</button>
+    </div>
+  </div>`;
 }
 
 export function settingsView({ t, prefs, entitled, registered = false, languages = LANGUAGES, names = LANGUAGE_NAMES }) {

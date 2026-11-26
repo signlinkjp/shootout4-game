@@ -1,7 +1,7 @@
 /** SHOOTOUT 4 — 試合画面（HUD・PKスコアボード・4択・7秒タイマー・キーパーの駆け引き） */
 
 import { CONFIG } from '../config.js';
-import { DIRECTIONS, pkBoard, kickerNumber, phase } from '../core/rules.js';
+import { DIRECTIONS, pkBoard, kickerNumber, phase, mirrorDirection } from '../core/rules.js';
 import { getCountry, countryName } from '../core/countries.js';
 import { flag, icon, esc } from './layout.js';
 
@@ -27,6 +27,28 @@ export function pkCellList(state, side, t) {
 
 export function pkCells(state, side, t) {
   return `<div class="pkrow" data-testid="pk-${side}">${pkCellList(state, side, t)}</div>`;
+}
+
+/**
+ * PK表の2行を「上段＝先攻 / 下段＝後攻」で返す（試合中・結果で同じ並び）。
+ * どちらがあなたでどちらが相手か一目で分かるよう、名前・先攻/後攻・国旗を添える。
+ */
+export function pkRows(state, t, { meCode = 'JP', oppCode = 'BR', className = '' } = {}) {
+  const order = [state.first, state.first === 'me' ? 'opp' : 'me'];
+  return order.map((side) => {
+    const mine = side === 'me';
+    const phaseLabel = side === state.first ? t('firstKick') : t('secondKick');
+    return `<div class="pkboard__row pkboard__row--${side} ${className}" data-testid="pk-row-${side}" data-order="${phaseLabel}">
+      <span class="pkboard__tag"><b>${esc(mine ? t('you') : t('opponent'))}</b><em>${esc(phaseLabel)}</em></span>
+      ${flag(mine ? meCode : oppCode, 'flag flag--xs')}
+      ${pkCells(state, side, t)}
+    </div>`;
+  }).join('');
+}
+
+/** キーパーの画面はキッカーと向かい合うので、表示用の左右は反転する */
+export function shownDirection(dir, role) {
+  return role === 'keep' ? mirrorDirection(dir) : dir;
 }
 
 function roleText(t, role) {
@@ -70,14 +92,7 @@ export function matchView({ t, prefs, state, language, online = false, roomLabel
     </header>
 
     <section class="pkboard" aria-label="PK scoreboard">
-      <div class="pkboard__row">
-        <span class="pkboard__tag">${esc(t('you'))}</span>
-        ${pkCells(state, 'me', t)}
-      </div>
-      <div class="pkboard__row">
-        <span class="pkboard__tag">${esc(t('opponent'))}</span>
-        ${pkCells(state, 'opp', t)}
-      </div>
+      ${pkRows(state, t, { meCode: me.code, oppCode: oppCode })}
     </section>
 
     <div class="stage" id="stage">
@@ -87,13 +102,23 @@ export function matchView({ t, prefs, state, language, online = false, roomLabel
         <div class="fallback-ball"></div>
       </div>
       <div class="stage__overlay">
-        <div class="turn ${role === 'shoot' ? 'turn--shoot' : 'turn--keep'}" id="role-chip" data-testid="role" data-role="${role}">
-          <span class="turn__dot" aria-hidden="true">${role === 'shoot' ? '⚽' : '🧤'}</span>
-          <b class="turn__text">${esc(turnText(t, role))}</b>
+        <div class="stage__info">
+          <div class="turn ${role === 'shoot' ? 'turn--shoot' : 'turn--keep'}" id="role-chip" data-testid="role" data-role="${role}">
+            <span class="turn__dot" aria-hidden="true">${role === 'shoot' ? '⚽' : '🧤'}</span>
+            <b class="turn__text">${esc(turnText(t, role))}</b>
+          </div>
+          <span class="chip chip--kicker" id="kicker-chip" data-testid="kicker">
+            ${esc(t('kicker'))} ${kickerNo}${myKicker ? ` · ${esc(myKicker.name)} · ${esc(footLabel(t, myKicker.foot))}` : ''}
+          </span>
         </div>
-        <span class="chip chip--kicker" id="kicker-chip" data-testid="kicker">
-          ${esc(t('kicker'))} ${kickerNo}${myKicker ? ` · ${esc(myKicker.name)} · ${esc(footLabel(t, myKicker.foot))}` : ''}
-        </span>
+        <div class="stage__tools">
+          <button type="button" class="iconbtn iconbtn--small stage__tool" data-action="toggle-sound" data-testid="match-sound"
+            aria-pressed="${prefs.sound || prefs.bgm ? 'true' : 'false'}" aria-label="${esc(t('soundToggle'))}" title="${esc(t('soundToggle'))}">
+            ${icon(prefs.sound || prefs.bgm ? 'sound' : 'soundOff')}
+          </button>
+          <button type="button" class="iconbtn iconbtn--small stage__tool" data-action="match-settings" data-testid="match-settings"
+            aria-label="${esc(t('settings'))}" title="${esc(t('settings'))}">${icon('gear')}</button>
+        </div>
       </div>
       <div class="handover" id="handover" hidden data-testid="handover">
         <div class="handover__card">
@@ -180,14 +205,14 @@ export function resultView({ t, state, record, language, prefs, online = false, 
     </div>
 
     <section class="pkboard pkboard--result">
-      <div class="pkboard__row"><span class="pkboard__tag">${esc(t('you'))}</span>${pkCells(state, 'me', t)}</div>
-      <div class="pkboard__row"><span class="pkboard__tag">${esc(t('opponent'))}</span>${pkCells(state, 'opp', t)}</div>
+      ${pkRows(state, t, { meCode: me.code, oppCode: oppCode })}
     </section>
 
     <section class="kicklog" aria-label="${esc(t('matchSummary'))}">
       <div class="kicklog__head">
-        <span>⚽ ${esc(t('kickLogShot'))}</span>
-        <span>🧤 ${esc(t('kickLogSave'))}</span>
+        <span class="kicklog__shot">⚽ ${esc(t('kickLogShot'))}</span>
+        <span class="kicklog__vs">vs</span>
+        <span class="kicklog__save">🧤 ${esc(t('kickLogSave'))}</span>
       </div>
       ${state.history.map((event, index) => logRow({
         t,

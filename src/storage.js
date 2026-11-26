@@ -84,6 +84,7 @@ export function loadPrefs(storage, languages) {
     vibrate: saved.vibrate !== false,
     night: saved.night === true,
     flash: saved.flash !== false,
+    order: saved.order === 'second' ? 'second' : 'first',
   };
   return prefs;
 }
@@ -107,7 +108,27 @@ export const EMPTY_RECORD = Object.freeze({
   streak: 0,
   bestStreak: 0,
   sudden: 0,
+  /* 通信対戦（相手がいる対人戦）の通算。CPU戦績とは別枠で、リセットでも消さない */
+  onlinePlayed: 0,
+  onlineWins: 0,
+  onlineLosses: 0,
+  onlineGoals: 0,
+  onlineConceded: 0,
+  onlineStreak: 0,
+  onlineBestStreak: 0,
+  points: 0,
 });
+
+/** CPU戦績だけを持つキー（画面の「リセット」で消える範囲） */
+export const CPU_RECORD_KEYS = Object.freeze([
+  'played', 'wins', 'losses', 'goals', 'conceded', 'saves', 'shots', 'streak', 'bestStreak', 'sudden',
+]);
+
+/** 通信対戦の通算（PRO）を持つキー。CPUのリセットでは触らない */
+export const ONLINE_RECORD_KEYS = Object.freeze([
+  'onlinePlayed', 'onlineWins', 'onlineLosses', 'onlineGoals', 'onlineConceded',
+  'onlineStreak', 'onlineBestStreak', 'points',
+]);
 
 export function loadRecord(storage) {
   const saved = readJSON(storage, KEYS.record, {}) || {};
@@ -146,7 +167,30 @@ export function addResult(record, { winner, goals = 0, conceded = 0, saves = 0, 
   };
 }
 
-export function resetRecord(storage) {
-  writeJSON(storage, KEYS.record, EMPTY_RECORD);
-  return { ...EMPTY_RECORD };
+export function resetRecord(storage, current = EMPTY_RECORD) {
+  /* CPU戦績だけを消す（通信対戦の通算は残す） */
+  const next = { ...EMPTY_RECORD };
+  for (const key of ONLINE_RECORD_KEYS) next[key] = Number(current[key]) || 0;
+  writeJSON(storage, KEYS.record, next);
+  return next;
+}
+
+/**
+ * 通信対戦（相手がいる対人戦）の通算を足す（純粋関数）。
+ * window の点数もここで動かす（ランキングと通算成績を同じ試合結果から）。
+ */
+export function addOnlineResult(record, { winner, goals = 0, conceded = 0 }) {
+  const win = winner === 'me';
+  const streak = win ? (record.onlineStreak || 0) + 1 : 0;
+  return {
+    ...record,
+    onlinePlayed: (record.onlinePlayed || 0) + 1,
+    onlineWins: (record.onlineWins || 0) + (win ? 1 : 0),
+    onlineLosses: (record.onlineLosses || 0) + (win ? 0 : 1),
+    onlineGoals: (record.onlineGoals || 0) + goals,
+    onlineConceded: (record.onlineConceded || 0) + conceded,
+    onlineStreak: streak,
+    onlineBestStreak: Math.max(record.onlineBestStreak || 0, streak),
+    points: Math.max(0, (record.points || 0) + (win ? 25 : -15)),
+  };
 }

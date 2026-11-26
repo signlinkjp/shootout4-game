@@ -48,12 +48,25 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
+    /// Build 3: アプリを離れるときは Audio Session を手放す。
+    /// これをしないと、ホーム画面へ戻っても Dynamic Island のスピーカー印と
+    /// 音が残り続けた（他のアプリの音も鳴らせない）。
+    static func deactivateAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            NSLog("SHOOTOUT 4: AVAudioSession deactivate failed: \(error)")
+        }
+    }
+
     func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state.
+        // Build 3: ホームボタン・他アプリ・電話などで前面から外れる直前に音を止める
+        AppDelegate.deactivateAudioSession()
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data.
+        // Build 3: バックグラウンドへ入ったら、念のためもう一度手放す
+        AppDelegate.deactivateAudioSession()
     }
 
     func applicationWillEnterForeground(_ application: UIApplication) {
@@ -99,7 +112,8 @@ public class ShootoutAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "ShootoutAudioPlugin"
     public let jsName = "ShootoutAudio"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "activate", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "activate", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "deactivate", returnType: CAPPluginReturnPromise)
     ]
 
     @objc public func activate(_ call: CAPPluginCall) {
@@ -109,6 +123,12 @@ public class ShootoutAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             "category": session.category.rawValue,
             "active": session.isOtherAudioPlaying
         ])
+    }
+
+    /// アプリを離れるときに Web 側からも呼べる（Dynamic Island のスピーカー印を消す）
+    @objc public func deactivate(_ call: CAPPluginCall) {
+        AppDelegate.deactivateAudioSession()
+        call.resolve(["active": false])
     }
 }
 

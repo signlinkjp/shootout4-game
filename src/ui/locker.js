@@ -1,4 +1,4 @@
-/** SHOOTOUT 4 — ロッカー（キャラクター + 4部位: ユニフォーム・パンツ・靴下・スパイク） */
+/** SHOOTOUT 4 — ロッカー（3Dプレビュー + キャラクター + 4部位 + 攻撃順） */
 
 import {
   CHARACTERS, SHIRTS, SHORTS, SOCKS, BOOTS, getShirt, getShorts, getSocks, getBoot,
@@ -43,11 +43,22 @@ function characterTile(character, { selected, entitled, t }) {
   </button>`;
 }
 
-export function lockerView({ t, entitled, draft, language, registered = false }) {
+/** プレビュー枠に出す「いま表示中のキャラ」のバッジ（日本語・中文・韓国語は全角括弧） */
+function characterBadge(character, entitled, t, language) {
+  const name = character.id === 'voxel' ? t('charVoxel') : t('charStylized');
+  const tag = character.id === 'voxel' ? t('freeTag') : (entitled ? t('proTag') : t('setPro'));
+  const wide = /^(ja|zh|ko)/.test(String(language || ''));
+  const badge = wide ? `${name}（${tag}）` : `${name} (${tag})`;
+  return { name, tag, badge };
+}
+
+export function lockerView({ t, entitled, draft, language, registered = false, order = 'first' }) {
   const shirt = getShirt(draft.shirt);
   const shorts = getShorts(draft.shorts);
   const socks = getSocks(draft.socks);
   const boot = getBoot(draft.boots);
+  const character = CHARACTERS.find((item) => item.id === draft.character) || CHARACTERS[0];
+  const badge = characterBadge(character, entitled, t, language);
   return screenShell({
     title: t('lockerTitle'),
     back: 'home',
@@ -56,8 +67,10 @@ export function lockerView({ t, entitled, draft, language, registered = false })
       ${icon('id')}<span>${esc(registered ? t('registerDone') : t('registerOpen'))}</span></button>`,
     body: `
       <section class="locker__preview locker__preview--${draft.character}"
+        data-preview-character="${draft.character}" data-testid="locker-preview-panel"
         style="--k1:${shirt.primary};--k2:${shirt.secondary};--k3:${shirt.accent};--k4:${shorts.color};--k5:${socks.color};--boot:${boot.color}">
-        <div class="lineup" data-testid="lineup">
+        <canvas class="locker__canvas" id="locker-preview" data-testid="locker-preview" aria-label="${esc(badge.name)}"></canvas>
+        <div class="lineup" data-testid="lineup" id="locker-lineup" hidden>
           ${Array.from({ length: 5 }, (_, index) => `<span class="player" style="--n:${index}">
             <i class="player__head"></i>
             <i class="player__body kit--${shirt.design}"></i>
@@ -67,7 +80,23 @@ export function lockerView({ t, entitled, draft, language, registered = false })
             <b>${index + 1}</b>
           </span>`).join('')}
         </div>
-        <p class="locker__caption">${esc(t('preview'))} · ${esc(shirt.name)} / ${esc(shorts.name)} / ${esc(socks.name)} / ${esc(boot.name)}</p>
+        <div class="locker__badges">
+          <span class="locker__badge locker__badge--character" data-testid="preview-badge"
+            data-character-badge="${character.id}">${esc(badge.badge)}</span>
+          <span class="locker__badge locker__badge--kit" data-testid="preview-kit">${esc(shirt.name)}</span>
+        </div>
+        <p class="locker__caption">${esc(shirt.name)} / ${esc(shorts.name)} / ${esc(socks.name)} / ${esc(boot.name)}</p>
+      </section>
+
+      <section class="panel panel--order" data-testid="locker-order">
+        <div class="row row--stack">
+          <span class="row__label">${esc(t('kickOrder'))}</span>
+          <div class="segmented" role="group" aria-label="${esc(t('kickOrder'))}">
+            <button type="button" class="seg ${order === 'second' ? '' : 'is-on'}" data-order="first" data-testid="order-first">${esc(t('firstKick'))}</button>
+            <button type="button" class="seg ${order === 'second' ? 'is-on' : ''}" data-order="second" data-testid="order-second">${esc(t('secondKick'))}</button>
+          </div>
+          <p class="mini">${esc(t('orderNote'))}</p>
+        </div>
       </section>
 
       <section class="panel">

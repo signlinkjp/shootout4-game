@@ -5,6 +5,11 @@ import { LEVELS, levelStars } from '../core/cpu.js';
 import { countryKit } from '../core/countries.js';
 import { flag, icon, esc, screenShell } from './layout.js';
 
+function stripHint(t) {
+  /* 「右にまだ16か国（PROは32か国）」に気付けるように、横スクロールを橋で案内する */
+  return `<span class="strip__hint" data-testid="strip-hint">${esc(t('scrollHint'))}</span>`;
+}
+
 function strip({ t, selected, action, language, entitled }) {
   return `<div class="strip" role="listbox" aria-label="${esc(t('countryTitle'))}">
     ${COUNTRIES.map((country) => {
@@ -31,13 +36,21 @@ export function countryView({ t, prefs, entitled, language }) {
     className: 'screen--country',
     body: `
       <section class="panel">
-        <h2 class="section-title">${esc(t('yourCountry'))}</h2>
+        <div class="section-head">
+          <div class="section-head__label">
+            <h2 class="section-title">${esc(t('yourCountry'))}</h2>
+            ${stripHint(t)}
+          </div>
+        </div>
         ${strip({ t, selected: me.code, action: 'mycountry', language, entitled })}
       </section>
 
       <section class="panel">
         <div class="section-head">
-          <h2 class="section-title">${esc(t('opponentCountry'))}</h2>
+          <div class="section-head__label">
+            <h2 class="section-title">${esc(t('opponentCountry'))}</h2>
+            ${stripHint(t)}
+          </div>
           <button class="btn btn--tiny" data-action="random-opponent">${esc(t('randomOpponent'))}</button>
         </div>
         ${strip({ t, selected: opp.code, action: opponentAction, language, entitled })}

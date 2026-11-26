@@ -844,6 +844,32 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
   let resolveKick = null;
   let shotApproach = false;
 
+  /** キーパーが立つライン（ゴールラインから 0.85m 前。ダイブでは少し下がる） */
+  const KEEPER_LINE_Z = GOAL_Z + 0.85;
+  const KEEPER_DIVE_Z = GOAL_Z + 0.45;
+
+  /**
+   * ダイビングの腕。両腕を「頭の先」へ伸ばす（ローカル +y 方向）。
+   * 体を横に倒すと、そのままボール側へ手が伸びる形になる。
+   */
+  function poseDiveArms(target, side) {
+    const parts = target.userData.parts;
+    parts.arms.forEach((arm, index) => {
+      const armSide = index === 0 ? -1 : 1;
+      /* 飛ぶ側の腕をまっすぐ、反対の腕を少しだけ内側へ */
+      const lead = armSide === side;
+      arm.rotation.z = armSide * (lead ? 2.75 : 2.35);
+      arm.rotation.x = lead ? -0.12 : 0.16;
+    });
+    /* 足は反対側へ流す（飛ぶ側の足を伸ばし、反対の足を曲げる） */
+    parts.legs.forEach((leg, index) => {
+      const legSide = index === 0 ? -1 : 1;
+      const lead = legSide === side;
+      leg.leg.rotation.x = lead ? -0.12 : 0.28;
+      leg.lower.rotation.x = lead ? 0.1 : 0.85;
+    });
+  }
+
   function resetPositions() {
     kickers.forEach((player, index) => {
       const slot = slots[index];
@@ -851,8 +877,10 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
       player.rotation.set(0, Math.PI * 0.92, 0);
       resetPose(player);
     });
+    dive = null;
     keeper.position.copy(keeper.userData.home);
     keeper.position.x = keeperBase.x + (state.role === 'keep' ? state.keeperOffset : state.remoteKeeperOffset) * KEEPER_RANGE;
+    keeper.position.z = KEEPER_LINE_Z;
     keeper.rotation.set(0, 0, 0);
     keeper.visible = true;
     resetPose(keeper);
@@ -937,14 +965,16 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
    * 1本のキック。shot は 'TL' などの4方向か、時間切れの 'OUT'（枠外）。
    * footed は蹴る選手の利き足（モーションだけに使う）。
    */
-  function kick({ shot = 'TL', save = 'BR', goal = true, kicker = 1, role = 'shoot', footed, onImpact } = {}) {
+  function kick({ shot = 'TL', save = 'BR', goal = true, kicker = 1, role = 'shoot', footed, stuck = false, onImpact } = {}) {
     if (state.busy) return Promise.resolve(false);
     state.busy = true;
     prepareKick({ kicker, role, footed });
 
     const miss = shot === 'OUT';
+    /* 動けなかった（stuck）か、方向が無いときはキーパーは飛ばない */
+    const noDive = Boolean(stuck) || !save || save === 'CENTER';
     const shotPoint = zonePoint(miss ? (role === 'shoot' ? 'TR' : 'TL') : shot);
-    const savePoint = zonePoint(save === 'CENTER' ? 'TL' : save);
+    const savePoint = zonePoint(save === 'CENTER' || !save ? 'TL' : save);
     /* 枠外はゴールの外（クロスバーの上・ポストの外）へ飛ばす */
     const target = miss
       ? new THREE.Vector3((shotPoint.x >= 0 ? 1 : -1) * (GOAL_HALF + 1.6), GOAL_HEIGHT + 1.5, GOAL_Z + 0.2)
@@ -960,6 +990,7 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
       keeperTarget: new THREE.Vector3(savePoint.x, savePoint.y, GOAL_Z + 0.85),
       goal,
       miss,
+      noDive,
       onImpact,
       impacted: false,
       kicked: false,
@@ -975,10 +1006,12 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
         duration: 300 + 520,
       });
     } else {
-      /* キーパー視点は引いたまま。ボールの行き先へ少しだけ寄る */
+      /* キーパー視点は引いたまま。ボールの行き先へ少しだけ寄る。
+         利き足で左右に振るとカメラが大きく反対側へ流れ、キーパーが逆方向へ
+         飛んだように見えたので、キーパー視点は同じ側のまま固定する。 */
       moveCamera({
-        pos: new THREE.Vector3(footSide * 4.8, 4.4, -21.5),
-        look: new THREE.Vector3(shotPoint.x * 0.5, 1.25, 1.5),
+        pos: new THREE.Vector3(4.9, 4.7, -21.4),
+        look: new THREE.Vector3(shotPoint.x * 0.45, 1.2, GOAL_Z + 1.5),
         duration: 300 + 520,
       });
     }
@@ -999,12 +1032,6 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
       shockwave.material.opacity = 0.9;
       shockwave.scale.setScalar(1);
       state.shake = 0.6;
-      moveCamera({
-        pos: new THREE.Vector3(hit.x > 0 ? 5.6 : -5.6, 3.1, GOAL_Z + 8.4),
-        look: new THREE.Vector3(hit.x * 0.7, 1.5, GOAL_Z + 1.2),
-        duration: 620,
-        ease: easeOutCubic,
-      });
     } else {
       state.celebration = 0.8;
       shockwave.position.copy(ball.position);
@@ -1012,6 +1039,28 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
       shockwave.material.opacity = 0.65;
       shockwave.scale.setScalar(0.8);
       state.shake = 0.35;
+    }
+    if (state.role === 'keep') {
+      /* キーパー視点のまま（斜め後ろから）：自分のダイビングとゴールの中のボールが同じ画に残る。
+         ここで前からのカメラに切り替えると、ゴールラインより手前にいるキーパーが
+         ポストの外に飛び出して見えた（Build 2 の見え方）。
+         ベースのキーパーカメラから少しだけ寄せる（ゴール裏の低い壁に隠れない高さ）。 */
+      moveCamera({
+        pos: new THREE.Vector3(4.6, 5.0, -20.8),
+        look: new THREE.Vector3(ball.position.x * 0.45, 1.0, GOAL_Z + 1.4),
+        duration: 520,
+        ease: easeOutCubic,
+      });
+      return;
+    }
+    if (goal) {
+      moveCamera({
+        pos: new THREE.Vector3(hit.x > 0 ? 5.6 : -5.6, 3.1, GOAL_Z + 8.4),
+        look: new THREE.Vector3(hit.x * 0.7, 1.5, GOAL_Z + 1.2),
+        duration: 620,
+        ease: easeOutCubic,
+      });
+    } else {
       moveCamera({
         pos: new THREE.Vector3(keeper.position.x + 2.6, 2.7, GOAL_Z + 7.2),
         look: new THREE.Vector3(keeper.position.x, 1.25, GOAL_Z + 0.8),
@@ -1064,15 +1113,20 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     trail.geometry.attributes.position.needsUpdate = true;
     trail.material.opacity = 0.6 * (1 - t * 0.45);
 
-    if (!dive && elapsed > flight.runUp + 110) {
+    if (!dive && !flight.noDive && elapsed > flight.runUp + 110) {
+      const sideX = flight.keeperTarget.x >= 0 ? 1 : -1;
+      /* 選んだコースに向かって、頭と手が先・足が後ろの自然なダイビング */
+      const targetX = Math.max(-(GOAL_HALF - 0.4), Math.min(GOAL_HALF - 0.4, flight.keeperTarget.x));
       dive = {
         start: now,
-        duration: 430,
+        duration: 470,
         from: keeper.position.clone(),
-        to: new THREE.Vector3(flight.keeperTarget.x, 0, GOAL_Z + 0.85),
-        side: flight.keeperTarget.x >= 0 ? 1 : -1,
+        to: new THREE.Vector3(targetX, 0, KEEPER_DIVE_Z),
+        side: sideX,
         high: flight.keeperTarget.y > 1.2,
+        done: false,
       };
+      poseDiveArms(keeper, sideX);
     }
 
     if (t >= 1) {
@@ -1107,14 +1161,21 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
   }
 
   function updateDive(now) {
-    if (!dive) return;
+    if (!dive || dive.done) return;
     const t = Math.min(1, (now - dive.start) / dive.duration);
     const eased = easeOutCubic(t);
     keeper.position.x = lerp(dive.from.x, dive.to.x, eased);
-    keeper.position.y = Math.sin(eased * Math.PI) * (dive.high ? 0.85 : 0.4);
-    keeper.rotation.z = dive.side * eased * (dive.high ? 1.4 : 1.1);
-    keeper.rotation.x = -eased * 0.3;
-    if (t >= 1) dive = null;
+    keeper.position.z = lerp(dive.from.z, dive.to.z, eased);
+    /* 低いコースは低く、高いコースはボールの高さまで跳ぶ */
+    const lift = dive.high ? 1.12 : 0.5;
+    keeper.position.y = eased * lift + Math.sin(Math.min(1, t) * Math.PI) * (dive.high ? 0.22 : 0.1);
+    /* 体を横に倒す。倒れる向きは「頭が飛ぶ側」＝選んだコース側（rotation.z は逆向き） */
+    keeper.rotation.z = -dive.side * eased * (dive.high ? 1.5 : 1.42);
+    keeper.rotation.x = -eased * 0.12;
+    if (t >= 1) {
+      /* 倒れた姿勢のまま次ラウンドまで保つ（すぐ起き上がって見えないように） */
+      dive.done = true;
+    }
   }
 
   function animateKickers(time) {
@@ -1310,6 +1371,8 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
         camera: camera.position.toArray().map((v) => Number(v.toFixed(2))),
         cameraFov: Number(camera.fov.toFixed(1)),
         keeper: keeper.position.toArray().map((v) => Number(v.toFixed(2))),
+        keeperRoll: Number(keeper.rotation.z.toFixed(3)),
+        keeperDive: dive ? { side: dive.side, high: dive.high, done: Boolean(dive.done) } : null,
         keeperOffset: state.keeperOffset,
         remoteKeeperOffset: state.remoteKeeperOffset,
         keeperDistance,

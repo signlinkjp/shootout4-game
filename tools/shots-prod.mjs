@@ -77,7 +77,10 @@ async function openPage(browser, { url, locale = 'ja-JP', viewport = PHONE, dpr 
   });
   page.on('requestfailed', (request) => {
     const target = request.url();
-    if (!target.includes('favicon') && !target.includes('supabase.co')) errors.push(`requestfailed: ${target}`);
+    /* 画面遷移や再読み込みで打ち切られた要求はエラー扱いにしない */
+    const reason = request.failure()?.errorText ?? '';
+    if (/ERR_ABORTED|NS_BINDING_ABORTED/.test(reason)) return;
+    if (!target.includes('favicon') && !target.includes('supabase.co')) errors.push(`requestfailed: ${target} ${reason}`);
   });
   await page.goto(`${url}/index.html`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__SHOOTOUT_READY__ === true, null, { timeout: 20000 });
@@ -87,6 +90,12 @@ async function openPage(browser, { url, locale = 'ja-JP', viewport = PHONE, dpr 
 async function shot(page, name) {
   await page.screenshot({ path: resolve(OUT, `shootout4-prod-${name}.png`) });
   process.stdout.write(`    → downloads/shootout4-prod-${name}.png\n`);
+}
+
+/** Build 3 の代表スクショ（downloads/shootout4-b3-*.png） */
+async function b3shot(page, name) {
+  await page.screenshot({ path: resolve(OUT, `shootout4-b3-${name}.png`) });
+  process.stdout.write(`    → downloads/shootout4-b3-${name}.png\n`);
 }
 
 const state = (page) => page.evaluate(() => ({
@@ -134,7 +143,14 @@ async function playToEnd(page, { max = 26 } = {}) {
     const info = await page.evaluate(() => window.__SHOOTOUT__.match);
     if (!info || info.winner) return info;
     const round = info.history;
-    const dir = round < 10 ? 'TL' : (info.role === 'shoot' ? 'TR' : 'TL');
+    let dir;
+    if (info.role === 'shoot') {
+      dir = round < 10 ? 'TL' : 'TR';
+    } else {
+      /* キーパーはキッカーと向かい合う（画面の左右が反対）。CPU のコース（TL）へ
+         飛ぶには、画面では右上（TR）を押す。 */
+      dir = 'TR';
+    }
     await playKick(page, dir);
     await page.evaluate(() => {
       if (window.__SHOOTOUT__.match?.winner) return;
@@ -446,6 +462,8 @@ async function main() {
       };
     });
     await page.waitForTimeout(1000);
+    /* バナーは演出の途中で書き換わるので、MISS KICK が出るまで待つ（最大3秒） */
+    await page.waitForFunction(() => /MISS KICK/.test(document.querySelector('#banner')?.textContent || ''), null, { timeout: 3000 }).catch(() => {});
     const timeoutResult = await page.evaluate(() => ({
       event: window.__SHOOTOUT__.match?.lastEvent,
       banner: document.querySelector('#banner')?.textContent ?? '',
@@ -482,7 +500,18 @@ async function main() {
     check('D3 結果画面（勝敗・最終スコア・PK表）', resultView.screen === 'result' && /勝利|敗北/.test(resultView.title) && resultView.cells >= 12, resultView);
     check('D4 結果の展開表記が ⚽ vs 🧤 で分かる', /⚽/.test(resultView.shot) && /🧤/.test(resultView.save) && resultView.logRows >= 10, resultView);
     check('D5 結果にキッカー名と利き足が出る', /トモアキ|タカシ|Player/.test(resultView.who) && /足/.test(resultView.who), resultView.who);
+    const legend = await page.evaluate(() => {
+      const head = document.querySelector('.kicklog__head');
+      const shot = head?.querySelector('.kicklog__shot')?.getBoundingClientRect();
+      const save = head?.querySelector('.kicklog__save')?.getBoundingClientRect();
+      return {
+        gap: shot && save ? Math.round(save.left - shot.right) : null,
+        text: head?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+      };
+    });
+    check('D7 凡例 ⚽ シュート vs 🧤 セーブ が近くに並ぶ（左右両端に離れない）', legend.gap != null && legend.gap < 90 && /vs/.test(legend.text), legend);
     await shot(page, 'result');
+    await b3shot(page, 'result');
     const record = await page.evaluate(() => window.__SHOOTOUT__.record);
     check('D6 戦績が保存される', record.played >= 1 && record.wins + record.losses === record.played, record);
 
@@ -567,7 +596,11 @@ async function main() {
       window.__SHOOTOUT__.confirmKick();
     });
     await page.waitForFunction(() => (window.__SHOOTOUT__.match?.history ?? 0) >= 1, null, { timeout: 12000 });
-    await page.waitForTimeout(420);
+    /* ボールがゴールに届くのはキックから約0.8秒後。紙吹雪・ネットの揺れが出るまで待つ */
+    await page.waitForFunction(() => {
+      const stadium = window.__SHOOTOUT__.stadium();
+      return stadium.confetti === true || stadium.netEnergy > 0;
+    }, null, { timeout: 4000 }).catch(() => {});
     const anim = await page.evaluate(() => ({
       confetti: window.__SHOOTOUT__.stadium().confetti,
       net: window.__SHOOTOUT__.stadium().netEnergy,
@@ -692,6 +725,235 @@ async function main() {
       screen: window.__SHOOTOUT__.screen,
     }));
     check('H5 世界ランキング画面（PRO連動）', rank.screen === 'rank' && rank.locked, rank);
+
+    /* ============================================================== *\
+     * J. Build 3 の修正項目（9項目）
+     * ============================================================== */
+    const overlap = (a, b) => Boolean(a && b)
+      && a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
+
+    /* J1 ホームのヒーロー枠（文字特大でも押し潰さない） */
+    await page.evaluate(() => window.__SHOOTOUT__.setPrefs({ size: 'extra', language: 'ja' }));
+    await page.evaluate(() => window.__SHOOTOUT__.go('home'));
+    await sleep(380);
+    const heroExtra = await page.evaluate(() => {
+      const hero = document.querySelector('.hero');
+      const kids = [...hero.children].filter((el) => !el.className.includes('rays'));
+      const gap = parseFloat(getComputedStyle(hero).rowGap) || 0;
+      const content = kids.reduce((sum, el) => sum + el.getBoundingClientRect().height, 0) + gap * (kids.length - 1);
+      const rect = hero.getBoundingClientRect();
+      const img = document.querySelector('.hero__img');
+      const word = document.querySelector('.hero__wordmark');
+      const tag = document.querySelector('.hero__tag');
+      const teams = document.querySelector('.hero__teams');
+      const inside = [img, word, tag, teams].every((el) => {
+        const box = el?.getBoundingClientRect();
+        return box && box.height > 0 && box.top >= rect.top - 1 && box.bottom <= rect.bottom + 1;
+      });
+      return {
+        inside,
+        squashed: content > rect.height + 1,
+        heroHeight: Math.round(rect.height),
+        content: Math.round(content),
+        imgHeight: Math.round(img?.getBoundingClientRect().height || 0),
+        emblemLoaded: img?.complete === true,
+        overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    });
+    check('J1 文字特大でもホームのエンブレム枠が押し潰されず、ロゴ・タイトル・対戦国が全部見える',
+      heroExtra.inside && heroExtra.squashed === false && heroExtra.emblemLoaded === true && heroExtra.imgHeight >= 60 && heroExtra.overflowX <= 0, heroExtra);
+    await b3shot(page, 'home-extra');
+    await page.evaluate(() => window.__SHOOTOUT__.setPrefs({ size: 'standard' }));
+    await page.evaluate(() => window.__SHOOTOUT__.go('home'));
+    await sleep(250);
+    await b3shot(page, 'home');
+
+    /* J2 バックグラウンドで音と時計が止まる */
+    await page.evaluate(() => window.__SHOOTOUT__.appHidden(false));
+    await page.evaluate(() => { window.__SHOOTOUT_FORCE_CPU__ = ['TL']; window.__SHOOTOUT__.startMatch(); });
+    await page.waitForFunction(() => window.__SHOOTOUT__.match?.handover === false && (window.__SHOOTOUT__.match?.remainingMs ?? 0) > 0, null, { timeout: 8000 });
+    await sleep(400);
+    const beforeHide = await page.evaluate(() => ({ audio: window.__SHOOTOUT__.audio, remaining: window.__SHOOTOUT__.match?.remainingMs }));
+    await page.evaluate(() => window.__SHOOTOUT__.appHidden(true));
+    await sleep(700);
+    const hiddenState = await page.evaluate(() => ({ audio: window.__SHOOTOUT__.audio, remaining: window.__SHOOTOUT__.match?.remainingMs }));
+    await sleep(500);
+    const hiddenLater = await page.evaluate(() => window.__SHOOTOUT__.match?.remainingMs);
+    const pauseDelta = Math.abs((hiddenLater ?? 0) - (hiddenState.remaining ?? 0));
+    await page.evaluate(() => window.__SHOOTOUT__.appHidden(false));
+    await sleep(500);
+    const shownState = await page.evaluate(() => ({ audio: window.__SHOOTOUT__.audio, remaining: window.__SHOOTOUT__.match?.remainingMs }));
+    check('J2 バックグラウンドでBGM・歓声を止め AudioContext を suspend（戻ると再開）',
+      beforeHide.audio.crowd === true && hiddenState.audio.backgrounded === true && hiddenState.audio.crowd === false
+      && hiddenState.audio.music === false && hiddenState.audio.context !== 'running'
+      && shownState.audio.backgrounded === false && shownState.audio.crowd === true,
+      { beforeHide: beforeHide.audio, hidden: hiddenState.audio, shown: shownState.audio });
+    check('J2b バックグラウンド中はラウンドの時計も止まる（7秒を無駄に消費しない）',
+      pauseDelta < 400 && (shownState.remaining ?? 0) < (hiddenState.remaining ?? 0), { pauseDelta, hidden: hiddenState.remaining, shown: shownState.remaining });
+
+    /* J3 試合画面の右上ボタン */
+    await page.evaluate(() => window.__SHOOTOUT__.hold());
+    const toolBoxes = await page.evaluate(() => {
+      const box = (selector) => {
+        const el = document.querySelector(selector);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      };
+      return {
+        sound: box('[data-testid="match-sound"]'),
+        settings: box('[data-testid="match-settings"]'),
+        back: box('[data-action="quit"]'),
+        hud: box('.hud'),
+        turn: box('[data-testid="role"]'),
+        pressed: document.querySelector('[data-testid="match-sound"]')?.getAttribute('aria-pressed'),
+      };
+    });
+    check('J3 プレイ中の右上にスピーカーと設定（戻る・スコア・ターン表示と重ならない）',
+      Boolean(toolBoxes.sound && toolBoxes.settings) && !overlap(toolBoxes.sound, toolBoxes.back)
+      && !overlap(toolBoxes.sound, toolBoxes.hud) && !overlap(toolBoxes.sound, toolBoxes.turn)
+      && !overlap(toolBoxes.sound, toolBoxes.settings), toolBoxes);
+    await b3shot(page, 'match-tools');
+    await page.click('[data-testid="match-sound"]');
+    await sleep(200);
+    const soundOff = await page.evaluate(() => ({
+      prefs: window.__SHOOTOUT__.prefs,
+      pressed: document.querySelector('[data-testid="match-sound"]')?.getAttribute('aria-pressed'),
+      screen: window.__SHOOTOUT__.screen,
+    }));
+    check('J3b 右上のスピーカーで音を ON/OFF（試合は続く）', soundOff.pressed === 'false' && soundOff.prefs.sound === false && soundOff.prefs.bgm === false && soundOff.screen === 'match', soundOff);
+    await page.click('[data-testid="match-sound"]');
+    await sleep(150);
+    await page.click('[data-testid="match-settings"]');
+    await sleep(250);
+    const sheet = await page.evaluate(() => {
+      const card = document.querySelector('[data-quick-settings]');
+      return {
+        open: Boolean(card),
+        rows: card ? card.querySelectorAll('[data-quick-toggle]').length : 0,
+        screen: window.__SHOOTOUT__.screen,
+        history: window.__SHOOTOUT__.match?.history ?? -1,
+      };
+    });
+    await b3shot(page, 'match-settings');
+    await page.click('[data-quick="close"]');
+    await sleep(200);
+    const sheetClosed = await page.evaluate(() => ({ open: Boolean(document.querySelector('[data-quick-settings]')), screen: window.__SHOOTOUT__.screen, history: window.__SHOOTOUT__.match?.history ?? -1 }));
+    check('J3c 右上の設定は試合を中断せずに開閉できる', sheet.open && sheet.rows === 6 && sheet.screen === 'match' && !sheetClosed.open && sheetClosed.screen === 'match' && sheetClosed.history === sheet.history, { sheet, sheetClosed });
+
+    /* J5 ロッカーの先攻/後攻とPK表の並び */
+    await page.evaluate(() => window.__SHOOTOUT__.go('locker'));
+    await sleep(450);
+    const lockerB3 = await page.evaluate(() => ({
+      preview: window.__SHOOTOUT__.preview,
+      badge: document.querySelector('[data-testid="preview-badge"]')?.textContent?.trim() ?? '',
+      canvas: Boolean(document.querySelector('[data-testid="locker-preview"]')?.getClientRects().length),
+      orders: document.querySelectorAll('[data-order]').length,
+      order: window.__SHOOTOUT__.prefs.order,
+    }));
+    check('J9 ロッカーは3Dプレビュー（近く・斜め正面）とキャラ名バッジを出す',
+      lockerB3.preview.available === true && lockerB3.canvas && /ブロック/.test(lockerB3.badge) && /無料/.test(lockerB3.badge), lockerB3);
+    await b3shot(page, 'locker');
+    /* キャラ切替は回転ジャンプ（spinning）で知らせる */
+    await page.click('[data-character="stylized"]');
+    await sleep(180);
+    const afterSwitch = await page.evaluate(() => ({ preview: window.__SHOOTOUT__.preview, badge: document.querySelector('[data-testid="preview-badge"]')?.textContent?.trim() ?? '' }));
+    await b3shot(page, 'locker-stylized');
+    check('J9b スタイリッシュに切り替えるとバッジが変わり、その場で回転ジャンプする',
+      afterSwitch.preview.character === 'stylized' && afterSwitch.preview.spinning === true && /スタイリッシュ/.test(afterSwitch.badge), afterSwitch);
+    await page.click('[data-character="voxel"]');
+    await sleep(220);
+    await page.click('[data-testid="order-second"]');
+    await sleep(320);
+    const orderChosen = await page.evaluate(() => ({
+      order: window.__SHOOTOUT__.prefs.order,
+      on: document.querySelector('[data-testid="order-second"]')?.classList.contains('is-on'),
+    }));
+    check('J5 ロッカーに先攻/後攻の選択ボタンがあり、後攻を選べる', lockerB3.orders >= 2 && orderChosen.order === 'second' && orderChosen.on === true, { lockerB3, orderChosen });
+    await page.evaluate(() => { window.__SHOOTOUT_FORCE_CPU__ = ['TL']; window.__SHOOTOUT__.startMatch(); window.__SHOOTOUT__.handover(); });
+    await sleep(500);
+    const pkOrder = await page.evaluate(() => ({
+      first: window.__SHOOTOUT__.match?.first,
+      rows: [...document.querySelectorAll('[data-testid^="pk-row-"]')].map((el) => `${el.dataset.testid}:${el.dataset.order}`),
+      hud: [...document.querySelectorAll('.hud__team')].map((el) => (el.className.includes('hud__team--me') ? 'me' : 'opp')),
+    }));
+    await b3shot(page, 'pk-order');
+    check('J5b 後攻を選んでキックオフすると相手が先攻（上段=先攻・下段=後攻、左=あなた）',
+      pkOrder.first === 'opp' && pkOrder.rows[0] === 'pk-row-opp:先攻' && pkOrder.rows[1] === 'pk-row-me:後攻'
+      && pkOrder.hud[0] === 'me' && pkOrder.hud[1] === 'opp', pkOrder);
+    await page.evaluate(() => { window.__SHOOTOUT__.setPrefs({ order: 'first' }); window.__SHOOTOUT__.go('home'); });
+
+    /* J6 戦績の2枠（リセットで通信通算が消えない） */
+    await page.evaluate(() => {
+      const raw = JSON.parse(localStorage.getItem('shootout4.record.v1') || '{}');
+      localStorage.setItem('shootout4.record.v1', JSON.stringify({
+        ...raw, played: 9, wins: 4, losses: 5, goals: 12, conceded: 14,
+        onlinePlayed: 7, onlineWins: 5, onlineLosses: 2, onlineGoals: 11, onlineConceded: 9, points: 60,
+      }));
+    });
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => window.__SHOOTOUT_READY__ === true, null, { timeout: 20000 });
+    await page.evaluate(() => { window.__SHOOTOUT__.skipOpening(); window.__SHOOTOUT__.go('stats'); });
+    await sleep(450);
+    const statsB3 = await page.evaluate(() => ({
+      cpu: Boolean(document.querySelector('[data-testid="stats-cpu"]')),
+      online: Boolean(document.querySelector('[data-testid="stats-online"]')),
+      onlinePlayed: document.querySelector('[data-testid="online-played"]')?.textContent?.trim(),
+      onlineWins: document.querySelector('[data-testid="online-wins"]')?.textContent?.trim(),
+      cpuPlayed: document.querySelector('[data-testid="stats-cpu"] .statgrid b')?.textContent?.trim(),
+    }));
+    await b3shot(page, 'stats');
+    await page.click('[data-testid="reset-record"]');
+    await sleep(250);
+    await page.click('[data-modal="yes"]');
+    await sleep(400);
+    const afterReset = await page.evaluate(() => ({
+      onlinePlayed: document.querySelector('[data-testid="online-played"]')?.textContent?.trim(),
+      record: window.__SHOOTOUT__.record,
+    }));
+    check('J6 戦績は CPU（リセット可）と PRO 通信対戦通算の2枠。リセットで通信通算は消えない',
+      statsB3.cpu && statsB3.online && statsB3.onlinePlayed === '7' && statsB3.onlineWins === '5' && statsB3.cpuPlayed === '9'
+      && afterReset.onlinePlayed === '7' && afterReset.record.onlineWins === 5 && afterReset.record.played === 0, { statsB3, afterReset });
+
+    /* J7 キーパーのダイビング（画面の左下を選ぶ→画面の左へ、頭から） */
+    await page.evaluate(() => { window.__SHOOTOUT_FORCE_CPU__ = ['TL']; window.__SHOOTOUT__.startMatch(); window.__SHOOTOUT__.handover(); window.__SHOOTOUT__.hold(); });
+    await sleep(400);
+    await page.evaluate(() => { window.__SHOOTOUT__.selectDirection('TR'); window.__SHOOTOUT__.confirmKick(); });
+    await page.waitForFunction(() => (window.__SHOOTOUT__.match?.history ?? 0) >= 1, null, { timeout: 12000 });
+    await page.evaluate(() => { window.__SHOOTOUT__.handover(); window.__SHOOTOUT__.next(); window.__SHOOTOUT__.handover(); window.__SHOOTOUT__.hold(); });
+    await page.waitForFunction(() => window.__SHOOTOUT__.match?.role === 'keep', null, { timeout: 8000 });
+    await sleep(300);
+    await page.click('[data-testid="zone-BL"]');
+    const pickedBL = await page.evaluate(() => ({
+      selected: [...document.querySelectorAll('.zone.is-selected')].map((el) => el.dataset.dir),
+      disabled: document.querySelector('#confirm')?.disabled,
+    }));
+    /* 時計を止めてからキック：演出の後に自動で次のラウンドへ進まない（ダイビングを撮る） */
+    await page.evaluate(() => window.__SHOOTOUT__.hold());
+    await page.click('[data-testid="confirm"]');
+    await sleep(2200);
+    await sleep(140);
+    const diveB3 = await page.evaluate(() => ({
+      stadium: window.__SHOOTOUT__.stadium(),
+      status: document.querySelector('#kick-status')?.textContent ?? '',
+      history: window.__SHOOTOUT__.match?.history ?? 0,
+    }));
+    await b3shot(page, 'keeper-dive');
+    check('J7 キーパーは押した左下（＝画面の左）へ、頭と手から飛んでゴール内に収まる',
+      pickedBL.selected[0] === 'BL' && pickedBL.disabled === false
+      && diveB3.stadium.keeper[0] > 0.6 && diveB3.stadium.keeperRoll < -0.2 && Math.abs(diveB3.stadium.keeper[0]) < 3.3
+      && diveB3.stadium.keeper[1] > 0.2, { pickedBL, ...diveB3 });
+
+    /* J8 国えらぶの横スクロール案内 */
+    await page.evaluate(() => window.__SHOOTOUT__.go('country'));
+    await sleep(400);
+    const hints = await page.evaluate(() => [...document.querySelectorAll('[data-testid="strip-hint"]')].map((el) => ({ text: el.textContent.trim(), visible: Boolean(el.getClientRects().length), box: Math.round(el.getBoundingClientRect().width) })));
+    await b3shot(page, 'country');
+    const hintEn = await page.evaluate(() => { window.__SHOOTOUT__.setPrefs({ language: 'en' }); return document.querySelector('[data-testid="strip-hint"]')?.textContent?.trim() ?? ''; });
+    await page.evaluate(() => window.__SHOOTOUT__.setPrefs({ language: 'ja' }));
+    await sleep(200);
+    check('J8 国えらぶの「あなたの国」「対戦相手」の横にスクロール案内（12言語対応）',
+      hints.length === 2 && hints.every((hint) => hint.visible && hint.box > 40 && /←|→/.test(hint.text)) && hintEn !== '' && hintEn !== hints[0].text, { hints, hintEn });
 
     /* ============================================================== *\
      * I. コンソールエラー 0

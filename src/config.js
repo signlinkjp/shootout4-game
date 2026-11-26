@@ -9,7 +9,7 @@ export const CONFIG = Object.freeze({
   brand: 'IPKSF',
   federation: 'INTERNATIONAL PENALTY KICK SHOOTOUT FEDERATION',
   version: '1.0.0',
-  build: 2,
+  build: 3,
   bundleId: 'jp.signlink.Shootout4',
 
   iap: {
@@ -56,4 +56,6 @@ export const DEFAULT_PREFS = Object.freeze({
   language: null,
   nickname: '',
   country: 'JP',
+  /* 攻撃順: first = 先攻 / second = 後攻（PKの1本目をどちらが蹴るか） */
+  order: 'first',
 });
