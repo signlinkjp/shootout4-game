@@ -12,8 +12,8 @@ import {
 } from '../src/storage.js';
 import { tr } from '../src/i18n.js';
 
-/* 2026-11-27（金）05:15 JST を基準にする（Build 4 の作業日） */
-const NOW = new Date('2026-11-27T05:15:00+09:00');
+/* 2026-11-27（金）05:15 ローカル時刻を基準にする（CI の UTC ランナーでも同じ日付で動くように） */
+const NOW = new Date(2026, 10, 27, 5, 15, 0);
 
 function fakeStorage(initial = {}) {
   const map = new Map(Object.entries(initial));
@@ -36,16 +36,16 @@ test('IPKSF 公式の勝ち点: 5本以内勝3 / サドンデス勝2 / サドン
 
 test('期間のキー: 月は毎月1日、週は毎週月曜で切り替わる', () => {
   assert.equal(monthKey(NOW), '2026-11');
-  assert.equal(monthKey(new Date('2026-12-01T00:00:00+09:00')), '2026-12');
+  assert.equal(monthKey(new Date(2026, 11, 1, 0, 0, 0)), '2026-12');
   /* 2026-11-27 は金曜 → 週の始まりは 11-23（月） */
   assert.equal(weekKey(NOW), '2026-11-23');
-  assert.equal(weekKey(new Date('2026-11-29T23:59:00+09:00')), '2026-11-23', '日曜はまだ同じ週');
-  assert.equal(weekKey(new Date('2026-11-30T00:00:00+09:00')), '2026-11-30', '月曜で切り替わる');
+  assert.equal(weekKey(new Date(2026, 10, 29, 23, 59, 0)), '2026-11-23', '日曜はまだ同じ週');
+  assert.equal(weekKey(new Date(2026, 10, 30, 0, 0, 0)), '2026-11-30', '月曜で切り替わる');
   assert.equal(startOfWeek(NOW).getDay(), 1);
   /* 残り日数（月間は翌月1日まで、週間は次の月曜まで） */
   assert.equal(daysLeftInMonth(NOW), 4);
   assert.equal(daysLeftInWeek(NOW), 3);
-  assert.equal(daysLeftInWeek(new Date('2026-11-29T12:00:00+09:00')), 1);
+  assert.equal(daysLeftInWeek(new Date(2026, 10, 29, 12, 0, 0)), 1);
 });
 
 test('集計: 得失点差・勝率・勝ち点を同時に積む', () => {
@@ -66,7 +66,7 @@ test('月間・週間は期間が変わると0に戻り、総合と勝率（通�
   assert.equal(standing.month.key, '2026-11');
 
   /* 週があける（月曜）→ 週間だけ0 */
-  const nextWeek = new Date('2026-11-30T00:00:30+09:00');
+  const nextWeek = new Date(2026, 10, 30, 0, 0, 30);
   const rolled = rollStanding(standing, nextWeek);
   assert.equal(rolled.changed, true);
   assert.equal(rolled.standing.week.points, 0);
@@ -75,7 +75,7 @@ test('月間・週間は期間が変わると0に戻り、総合と勝率（通�
   assert.equal(rolled.standing.total.points, 3, '総合は残る');
 
   /* 月があける → 月間も0（総合は残る） */
-  const nextMonth = new Date('2026-12-01T00:00:10+09:00');
+  const nextMonth = new Date(2026, 11, 1, 0, 0, 10);
   const monthRoll = rollStanding(standing, nextMonth);
   assert.equal(monthRoll.standing.month.points, 0);
   assert.equal(monthRoll.standing.month.key, '2026-12');
