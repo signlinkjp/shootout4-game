@@ -69,7 +69,7 @@ export const BASE = {
     statsProNote: '相手がいる通信対戦の通算成績です。CPU戦績のリセットでは消えません。',
 
     rulesTitle: '遊び方', rulesFair: '課金で強くなることはありません。',
-    rulesText: '両チームが交互に5本ずつ蹴ります。あなたは「狙う方向」か「飛ぶ方向」を4つ（左上・右上・左下・右下）から選び、7秒以内に決定ボタンで確定します。相手も同時に選んでいて、両方が決まった瞬間に結果が出ます。狙った方向と飛んだ方向が同じならセーブ、違えばゴール。5本を終えて同点なら、6本目からサドンデスです。残りの本数で追いつけなくなった時点で試合は終わります。 7秒以内に決めないと、自動で選ばずに枠外へ蹴って MISS KICK になります（キーパーのときは動けません）。',
+    rulesText: '両チームが交互に5本ずつ蹴ります。あなたは「狙う方向」か「飛ぶ方向」を4つ（左上・右上・左下・右下）から選び、7秒以内に決定ボタンで確定します。相手も同時に選んでいて、両方が決まった瞬間に結果が出ます。狙った方向と飛んだ方向が同じならセーブ、違えばゴール。5本を終えて同点なら、6本目からサドンデスです。残りの本数で追いつけなくなった時点で試合は終わります。 7秒以内に決めないと、自動で選ばずに枠外へ蹴って MISS KICK になります（キーパーのときは動けません）。キーパーの番も、映っている画面そのままの向きで選びます（例：画面の左上をタップすると、画面の左上に飛び、そこへ来たシュートを止めます）。',
 
     settingsTitle: '設定', sound: '効果音', bgm: 'BGM', vibrate: 'バイブ', textSize: '文字サイズ',
     size_standard: '標準', size_large: '大', size_extra: '特大', language: '言語',
@@ -91,6 +91,7 @@ export const BASE = {
     handoverShootHint: '4コースから選んで、7秒以内に決定',
     handoverKeepHint: '相手のシュートを止めよう。左右に動いて揺さぶれる',
     keeperHint: 'キーパーを左右にドラッグ（駆け引き）',
+    keeperDirHint: '画面の向きで選ぶ（例：左上＝画面の左上）',
     missKick: 'MISS KICK 😭💦',
     timeoutMiss: '時間切れ：枠外に外しました',
     timeoutStuck: '時間切れ：キーパーが動けませんでした',
@@ -133,7 +134,7 @@ export const BASE = {
     proBenefitCountries: '選べる国が16→32か国に（ワールドカップ風）',
     shareResult: '結果をシェア',
     shareSudden: 'サドンデス{kicks}本目',
-    voiceMiss: 'ミス',
+    voiceMiss: 'ミスキック',
     rankTabTotal: '総合',
     rankTabMonth: '月間',
     rankTabWeek: '週間',
@@ -230,7 +231,7 @@ export const BASE = {
     statsProNote: 'Career record of online matches against real players. Resetting the CPU record does not clear it.',
 
     rulesTitle: 'How to play', rulesFair: 'Nothing you can buy makes you stronger.',
-    rulesText: 'The teams take five kicks each, alternating. Choose one of four corners (top left, top right, bottom left, bottom right) and confirm within seven seconds. Your opponent chooses at the same time, and the result appears the moment both are in. Same corner as the keeper means a save; a different corner is a goal. If the score is level after five kicks each, the shootout continues from the sixth kick as sudden death. The match also ends as soon as the remaining kicks can no longer change the result. If you do not decide within 7 seconds the shot goes wide for a MISS KICK (as keeper you fail to move).',
+    rulesText: 'The teams take five kicks each, alternating. Choose one of four corners (top left, top right, bottom left, bottom right) and confirm within seven seconds. Your opponent chooses at the same time, and the result appears the moment both are in. Same corner as the keeper means a save; a different corner is a goal. If the score is level after five kicks each, the shootout continues from the sixth kick as sudden death. The match also ends as soon as the remaining kicks can no longer change the result. If you do not decide within 7 seconds the shot goes wide for a MISS KICK (as keeper you fail to move). As keeper you also pick by the screen as you see it: tap top left and you dive to the top left of the screen, stopping a shot that comes there.',
 
     settingsTitle: 'Settings', sound: 'Sound', bgm: 'Music', vibrate: 'Vibration', textSize: 'Text size',
     size_standard: 'Standard', size_large: 'Large', size_extra: 'Extra large', language: 'Language',
@@ -252,6 +253,7 @@ export const BASE = {
     handoverShootHint: 'Pick a corner and confirm within 7 seconds',
     handoverKeepHint: 'Stop the shot. Move left or right to feint',
     keeperHint: 'Drag the keeper left or right (feint)',
+    keeperDirHint: 'Pick by the screen (top left = screen top left)',
     missKick: 'MISS KICK 😭💦',
     timeoutMiss: 'Time up: the shot went wide',
     timeoutStuck: 'Time up: the keeper could not move',
@@ -391,7 +393,7 @@ export const BASE = {
     statsProNote: '与真人联机对战的总战绩。重置CPU战绩不会清除。',
 
     rulesTitle: '玩法', rulesFair: '付费不会让你变强。',
-    rulesText: '两队交替各罚五球。你从四个角（左上、右上、左下、右下）中选择射门或扑救方向，并在七秒内按确定。对手同时选择，双方都确定后立即出结果。与门将方向相同则被扑出，不同则进球。五球后平分则从第六球开始突然死亡。当剩余球数已无法改变结果时，比赛立即结束。 若7秒内未决定，射门将打向界外成为 MISS KICK（守门员时则无法移动）。',
+    rulesText: '两队交替各罚五球。你从四个角（左上、右上、左下、右下）中选择射门或扑救方向，并在七秒内按确定。对手同时选择，双方都确定后立即出结果。与门将方向相同则被扑出，不同则进球。五球后平分则从第六球开始突然死亡。当剩余球数已无法改变结果时，比赛立即结束。 若7秒内未决定，射门将打向界外成为 MISS KICK（守门员时则无法移动）。守门员时也按屏幕上看到的方向选择（例：点屏幕左上，就会飞向屏幕左上，并扑出飞向那里的射门）。',
 
     settingsTitle: '设置', sound: '音效', bgm: '音乐', vibrate: '震动', textSize: '文字大小',
     size_standard: '标准', size_large: '大', size_extra: '特大', language: '语言',
@@ -413,6 +415,7 @@ export const BASE = {
     handoverShootHint: '选择一个角落，7秒内确认',
     handoverKeepHint: '挡住射门。可左右移动来干扰',
     keeperHint: '左右拖动守门员（心理战）',
+    keeperDirHint: '按画面方向选择（例：左上＝画面左上）',
     missKick: 'MISS KICK 😭💦',
     timeoutMiss: '时间到：射门打偏出界',
     timeoutStuck: '时间到：守门员没能移动',
@@ -552,7 +555,7 @@ export const BASE = {
     statsProNote: '與真人連線對戰的總戰績。重設CPU戰績不會清除。',
 
     rulesTitle: '玩法', rulesFair: '付費不會讓你變強。',
-    rulesText: '兩隊交替各罰五球。你從四個角落（左上、右上、左下、右下）中選擇射門或撲救方向，並在七秒內按確定。對手同時選擇，雙方都確定後立即出結果。與門將方向相同則被撲出，不同則進球。五球後平手則從第六球開始驟死賽。當剩餘球數已無法改變結果時，比賽立即結束。 若7秒內未決定，射門將打向界外成為 MISS KICK（守門員時則無法移動）。',
+    rulesText: '兩隊交替各罰五球。你從四個角落（左上、右上、左下、右下）中選擇射門或撲救方向，並在七秒內按確定。對手同時選擇，雙方都確定後立即出結果。與門將方向相同則被撲出，不同則進球。五球後平手則從第六球開始驟死賽。當剩餘球數已無法改變結果時，比賽立即結束。 若7秒內未決定，射門將打向界外成為 MISS KICK（守門員時則無法移動）。守門員時也按畫面上看到的方向選擇（例：點畫面左上，就會飛向畫面左上，並撲出飛向那裡的射門）。',
 
     settingsTitle: '設定', sound: '音效', bgm: '音樂', vibrate: '震動', textSize: '文字大小',
     size_standard: '標準', size_large: '大', size_extra: '特大', language: '語言',
@@ -574,6 +577,7 @@ export const BASE = {
     handoverShootHint: '選擇一個角落，7秒內確認',
     handoverKeepHint: '擋住射門。可左右移動來干擾',
     keeperHint: '左右拖動守門員（心理戰）',
+    keeperDirHint: '按畫面方向選擇（例：左上＝畫面左上）',
     missKick: 'MISS KICK 😭💦',
     timeoutMiss: '時間到：射門打偏出界',
     timeoutStuck: '時間到：守門員沒能移動',
@@ -713,7 +717,7 @@ export const BASE = {
     statsProNote: '실제 상대와의 온라인 대전 통산 전적입니다. CPU 전적 초기화로는 지워지지 않습니다.',
 
     rulesTitle: '게임 방법', rulesFair: '과금으로 강해지지 않습니다.',
-    rulesText: '두 팀이 번갈아 5개씩 찹니다. 네 구석(왼쪽 위, 오른쪽 위, 왼쪽 아래, 오른쪽 아래) 중 하나를 골라 7초 안에 결정을 누릅니다. 상대도 동시에 고르고, 둘 다 정해진 순간 결과가 나옵니다. 골키퍼 방향과 같으면 선방, 다르면 골입니다. 5개씩 마치고 동점이면 6번째부터 서든데스입니다. 남은 개수로 따라잡을 수 없게 되면 경기가 끝납니다. 7초 안에 결정하지 않으면 자동 선택 없이 골대 밖으로 슛이 나가 MISS KICK이 됩니다(골키퍼일 때는 움직이지 못합니다).',
+    rulesText: '두 팀이 번갈아 5개씩 찹니다. 네 구석(왼쪽 위, 오른쪽 위, 왼쪽 아래, 오른쪽 아래) 중 하나를 골라 7초 안에 결정을 누릅니다. 상대도 동시에 고르고, 둘 다 정해진 순간 결과가 나옵니다. 골키퍼 방향과 같으면 선방, 다르면 골입니다. 5개씩 마치고 동점이면 6번째부터 서든데스입니다. 남은 개수로 따라잡을 수 없게 되면 경기가 끝납니다. 7초 안에 결정하지 않으면 자동 선택 없이 골대 밖으로 슛이 나가 MISS KICK이 됩니다(골키퍼일 때는 움직이지 못합니다). 골키퍼일 때도 화면에 보이는 그대로의 방향으로 고릅니다(예: 화면 왼쪽 위를 누르면 화면 왼쪽 위로 날아가 그쪽으로 온 슛을 막습니다).',
 
     settingsTitle: '설정', sound: '효과음', bgm: '음악', vibrate: '진동', textSize: '글자 크기',
     size_standard: '표준', size_large: '크게', size_extra: '아주 크게', language: '언어',
@@ -735,6 +739,7 @@ export const BASE = {
     handoverShootHint: '네 코스 중 하나를 골라 7초 안에 결정',
     handoverKeepHint: '상대 슛을 막으세요. 좌우로 움직여 흔들 수 있습니다',
     keeperHint: '골키퍼를 좌우로 드래그 (심리전)',
+    keeperDirHint: '화면 방향대로 선택 (예: 왼쪽 위=화면 왼쪽 위)',
     missKick: 'MISS KICK 😭💦',
     timeoutMiss: '시간 초과: 골대 밖으로 나갔습니다',
     timeoutStuck: '시간 초과: 골키퍼가 움직이지 못했습니다',

@@ -87,19 +87,25 @@ async function openPage(browser, { url, locale = 'ja-JP', viewport = PHONE, dpr 
   return { context, page };
 }
 
+/* スクショは検証の合否に使わない（SHOOTOUT_E2E_NO_SHOTS=1 で省いて時間を短くできる） */
+const CAPTURE = process.env.SHOOTOUT_E2E_NO_SHOTS !== '1';
+
 async function shot(page, name) {
+  if (!CAPTURE) return;
   await page.screenshot({ path: resolve(OUT, `shootout4-prod-${name}.png`) });
   process.stdout.write(`    → downloads/shootout4-prod-${name}.png\n`);
 }
 
 /** Build 3 の代表スクショ（downloads/shootout4-b3-*.png） */
 async function b3shot(page, name) {
+  if (!CAPTURE) return;
   await page.screenshot({ path: resolve(OUT, `shootout4-b3-${name}.png`) });
   process.stdout.write(`    → downloads/shootout4-b3-${name}.png\n`);
 }
 
 /** Build 4 の代表スクショ（downloads/shootout4-b4-*.png） */
 async function b4shot(page, name) {
+  if (!CAPTURE) return;
   await page.screenshot({ path: resolve(OUT, `shootout4-b4-${name}.png`) });
   process.stdout.write(`    → downloads/shootout4-b4-${name}.png\n`);
 }
@@ -398,6 +404,11 @@ async function main() {
     check('G3 キッカー表示に選手名と利き足（左）', /トモアキ/.test(chip) && /左足/.test(chip), chip);
     check('B5 試合画面に4択と決定ボタン', await page.evaluate(() => document.querySelectorAll('.zone').length === 4 && Boolean(document.querySelector('#confirm'))));
     check('B6 決定は未選択では押せない', await page.evaluate(() => document.querySelector('#confirm').disabled === true));
+    const shootDirHint = await page.evaluate(() => {
+      const hint = document.querySelector('[data-testid="keeper-dir-hint"]');
+      return { exists: Boolean(hint), hidden: hint ? hint.hidden === true && !hint.getClientRects().length : false };
+    });
+    check('L4 シュートの番にはキーパー用の方向案内を出さない', shootDirHint.exists && shootDirHint.hidden, shootDirHint);
     await page.evaluate(() => window.__SHOOTOUT__.hold());
     await sleep(120);
     await shot(page, 'match-day');
@@ -436,6 +447,22 @@ async function main() {
     const keeperInfo = await state(page);
     check('F1 キーパー視点はゴール全体が見える引いた斜め後ろ', keeperInfo.match.role === 'keep'
       && keeperInfo.stadium.role === 'keep' && keeperInfo.stadium.keeperDistance > 8 && keeperInfo.stadium.camera[2] < -18, keeperInfo.stadium);
+    const dirHint = await page.evaluate(() => {
+      const hint = document.querySelector('[data-testid="keeper-dir-hint"]');
+      const zone = document.querySelector('[data-testid="zone-TL"] span');
+      const rect = hint?.getBoundingClientRect();
+      const stage = document.querySelector('#stage')?.getBoundingClientRect();
+      return {
+        visible: Boolean(hint && hint.getClientRects().length),
+        text: hint?.textContent?.trim() ?? '',
+        tl: zone?.textContent?.trim() ?? '',
+        inside: Boolean(rect && stage && rect.left >= stage.left - 1 && rect.right <= stage.right + 1),
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    });
+    check('L3 キーパーの番に「画面の向きで選ぶ」短い案内（例はボタンと同じ左上・画面内に収まる）',
+      dirHint.visible && dirHint.text.length > 8 && dirHint.tl.length > 0
+      && dirHint.text.toLowerCase().includes(dirHint.tl.toLowerCase()) && dirHint.inside && dirHint.overflow <= 0, dirHint);
     const zoneBox = await page.locator('[data-testid="keeper-zone"]').boundingBox();
     const hintVisible = await page.evaluate(() => {
       const hint = document.querySelector('.keeper-zone__hint');
@@ -1071,8 +1098,8 @@ async function main() {
     const rightRun = await runUpFor('right');
     check('K6 右利きはボールの左から右足、左利きは右から左足（助走位置・角度・蹴り足）',
       leftRun && rightRun
-      && leftRun.startX > 0 && leftRun.plantX > 0 && Math.abs(leftRun.facing - Math.PI * 1.07) < 0.001 && leftRun.kickLeg === 0
-      && rightRun.startX < 0 && rightRun.plantX < 0 && Math.abs(rightRun.facing - Math.PI * 0.93) < 0.001 && rightRun.kickLeg === 1
+      && leftRun.startX > 0 && leftRun.plantX > 0 && Math.abs(leftRun.facing - Math.PI * 1.07) < 0.001 && leftRun.kickLeg === 1
+      && rightRun.startX < 0 && rightRun.plantX < 0 && Math.abs(rightRun.facing - Math.PI * 0.93) < 0.001 && rightRun.kickLeg === 0
       && Math.abs(leftRun.shooter.pos[0] - leftRun.startX) < 0.02
       && Math.abs(rightRun.shooter.pos[0] - rightRun.startX) < 0.02, { leftRun, rightRun });
     await b4shot(page, 'runup-right');
@@ -1281,6 +1308,56 @@ async function main() {
     check('K14b 共有できない環境ではクリップボードへコピーして「コピーしました」',
       /#SHOOTOUT4/.test(shared.copied) && shared.copied === shareInfo.text && /コピーしました/.test(shared.toast), shared);
     await b4shot(page, 'result-share');
+
+    /* ============================================================== *\
+     * L. Build 5（ボイスは人の声・キーパーの方向説明）
+     * ============================================================== */
+    const goalVoice = await page.evaluate(() => {
+      window.__SHOOTOUT__.setPrefs({ language: 'ja' });
+      const result = window.__SHOOTOUT__.voice('goal');
+      return { result, voice: window.__SHOOTOUT__.audio.voice };
+    });
+    check('L1 ゴールのボイスは言葉で鳴る（絵文字なし・発声経路が分かる）',
+      goalVoice.voice?.kind === 'goal' && goalVoice.voice.text === 'ゴール'
+      && /^[\p{L}\p{N} ]+$/u.test(goalVoice.voice.text)
+      && ['native', 'browser', 'formant'].includes(goalVoice.voice.spoken)
+      && goalVoice.voice.language === 'ja', goalVoice);
+
+    const voiceByLanguage = [];
+    for (const language of languages) {
+      const info = await page.evaluate((tag) => {
+        window.__SHOOTOUT__.setPrefs({ language: tag });
+        window.__SHOOTOUT__.voice('miss', null, tag);
+        const voice = window.__SHOOTOUT__.audio.voice;
+        return { text: voice?.text ?? '', language: voice?.language ?? '', kind: voice?.kind ?? '' };
+      }, language);
+      if (!info.text || info.kind !== 'miss' || /[^\p{L}\p{N} ]/u.test(info.text)) voiceByLanguage.push({ language, ...info });
+    }
+    check('L5 ミスキックのボイスも12言語で言葉になる（絵文字・記号なし）', voiceByLanguage.length === 0, voiceByLanguage);
+    await page.evaluate(() => window.__SHOOTOUT__.setPrefs({ language: 'ja' }));
+
+    /* 遊び方: キーパーの方向の説明（12言語・例がボタンの文言と一致） */
+    const keeperRuleProblems = [];
+    for (const language of languages) {
+      await page.evaluate((tag) => {
+        window.__SHOOTOUT__.setPrefs({ language: tag });
+        window.__SHOOTOUT__.go('rules');
+      }, language);
+      await sleep(120);
+      const info = await page.evaluate(() => {
+        const text = document.querySelector('.rules-text')?.textContent ?? '';
+        const tl = document.querySelector('.goaldiagram__zone--tl')?.textContent?.trim() ?? '';
+        return {
+          length: text.length,
+          tl,
+          mentions: tl ? text.toLowerCase().includes(tl.toLowerCase()) : false,
+          overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
+      });
+      if (info.length < 120 || !info.mentions || info.overflow > 0) keeperRuleProblems.push({ language, ...info });
+    }
+    check('L2 遊び方にキーパーの方向の説明と例（12言語・ボタン文言と一致・はみ出しなし）', keeperRuleProblems.length === 0, keeperRuleProblems);
+    await page.evaluate(() => { window.__SHOOTOUT__.setPrefs({ language: 'ja' }); window.__SHOOTOUT__.go('home'); });
 
     /* ============================================================== *\
      * I. コンソールエラー 0

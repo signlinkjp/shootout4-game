@@ -526,9 +526,15 @@ export function buildCharacter({ style = 'voxel', keeper = false, tone = 0, foot
   group.userData.keeper = Boolean(keeper);
   group.userData.hair = hairSpec;
   group.userData.hands = { kind: keeper ? 'glove' : 'fist', count: parts.hands.length };
+  /*
+   * 利き足と蹴り足（Build 5 で左右を修正）。
+   * キャラクターのローカル座標は +Z が正面（顔・目・スパイクのつま先）なので、
+   * 本人から見た「右」は -X。脚は side の -1 → +1 の順に作るので、
+   *   parts.legs[0] = side -1 = 右足 / parts.legs[1] = side +1 = 左足
+   * になる。右利きは legs[0]、左利きは legs[1] を蹴り足にする。
+   */
   group.userData.footed = footed === 'left' ? 'left' : 'right';
-  /* 蹴り足: legs[0] = 左, legs[1] = 右 */
-  group.userData.kickLeg = group.userData.footed === 'left' ? 0 : 1;
+  group.userData.kickLeg = group.userData.footed === 'right' ? 0 : 1;
   group.userData.supportLeg = group.userData.kickLeg === 0 ? 1 : 0;
   group.userData.base = {
     hipY,
@@ -560,8 +566,14 @@ export function setHair(character, hair) {
 export function setFooted(character, footed) {
   if (!character) return;
   character.userData.footed = footed === 'left' ? 'left' : 'right';
-  character.userData.kickLeg = character.userData.footed === 'left' ? 0 : 1;
+  /* 右利き = legs[0]（右足）/ 左利き = legs[1]（左足）— buildCharacter と同じ決め方 */
+  character.userData.kickLeg = character.userData.footed === 'right' ? 0 : 1;
   character.userData.supportLeg = character.userData.kickLeg === 0 ? 1 : 0;
+  /* 脚は左右で同じ形なので、蹴り足の切り替えだけで振り抜く脚が入れ替わる */
+  character.userData.parts?.legs?.forEach((leg) => {
+    leg.leg.rotation.x = 0;
+    leg.lower.rotation.x = 0;
+  });
 }
 
 /** 見た目（テクスチャ・色・スパイクの形）を当てる */

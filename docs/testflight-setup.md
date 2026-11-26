@@ -19,10 +19,10 @@
 | PRO の商品 ID（非消費型・買い切り） | `jp.signlink.Shootout4.pro` |
 | 価格 | ¥300（App Store Connect で設定） |
 | 対応 | iPhone 縦持ちのみ / iOS 15 以上 |
-| ビルド番号 | `ios/App/App.xcodeproj/project.pbxproj` の `CURRENT_PROJECT_VERSION`（いま **4**） |
+| ビルド番号 | `ios/App/App.xcodeproj/project.pbxproj` の `CURRENT_PROJECT_VERSION`（いま **5**） |
 | バージョン | `MARKETING_VERSION`（いま **1.0.0**） |
 
-ビルド番号はワークフローに書いてありません。**pbxproj の数字を上げるだけ**で Build 4, 5…になります。
+ビルド番号はワークフローに書いてありません。**pbxproj の数字を上げるだけ**で Build 5, 6…になります。
 
 ---
 

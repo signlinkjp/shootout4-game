@@ -98,8 +98,11 @@ test('4. 利き足の蹴り分け: 右はボールの左から右足、左はボ
   assert.notEqual(rStart, lStart);
   assert.ok(Math.abs(Number(rFace) - 0.93) < 0.001 && Math.abs(Number(lFace) - 1.07) < 0.001, '向きも別（ゴールを向く）');
   assert.ok(Math.cos(Math.PI * Number(rFace)) < 0 && Math.cos(Math.PI * Number(lFace)) < 0, 'どちらもゴール方向');
-  assert.match(stadium, /kickLeg: 1/, '右利きの蹴り足は右脚');
-  assert.match(stadium, /kickLeg: 0/, '左利きの蹴り足は左脚');
+  /* Build 5: キャラクターは +Z が正面なので、右足 = legs[0]（side -1）/ 左足 = legs[1]（side +1） */
+  const rightBlock = stadium.match(/right: \{[^}]*\}/)[0];
+  const leftBlock = stadium.match(/left: \{[^}]*\}/)[0];
+  assert.match(rightBlock, /kickLeg: 0, supportLeg: 1/, '右利きの蹴り足は右足（legs[0]）');
+  assert.match(leftBlock, /kickLeg: 1, supportLeg: 0/, '左利きの蹴り足は左足（legs[1]）');
   assert.match(stadium, /applyRunUp\(shooter, kickFoot\)/);
   assert.match(stadium, /runUp: \(\(\) =>/);
 });

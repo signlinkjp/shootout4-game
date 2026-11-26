@@ -39,20 +39,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// 電話・Siri・バックグラウンドから戻ると、セッションが止まっていることがある。
     /// Build 4: 一度で有効にならないことがあるので、少し後にもう一度試す。
     static func activateAudioSession() {
-        activateAudioSessionOnce()
+        _ = activateAudioSessionOnce()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            AppDelegate.activateAudioSessionOnce()
+            _ = AppDelegate.activateAudioSessionOnce()
         }
     }
 
-    private static func activateAudioSessionOnce() {
+    static func activateAudioSessionOnce() -> Bool {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
+            return true
         } catch {
             // 音が出せなくてもゲームは続けられる（落とさない）
             NSLog("SHOOTOUT 4: AVAudioSession setup failed: \(error)")
+            return false
         }
     }
 
@@ -72,9 +74,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         AppDelegate.deactivateAudioSession()
     }
 
+    /// Build 5: アプリの音声合成も止める（バックグラウンドで「ゴール！」が続かないように）
+    static func stopSpeaking() {
+        ShootoutAudioPlugin.stopSpeaking()
+    }
+
     func applicationDidEnterBackground(_ application: UIApplication) {
         // Build 3: バックグラウンドへ入ったら、念のためもう一度手放す
         AppDelegate.deactivateAudioSession()
+        // Build 5: 読み上げの途中でも止める
+        AppDelegate.stopSpeaking()
     }
 
     func applicationWillEnterForeground(_ application: UIApplication) {
@@ -122,22 +131,84 @@ public class ShootoutAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "ShootoutAudio"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "activate", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "deactivate", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "deactivate", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise)
     ]
+
+    /* Build 5: 読み上げの本体。
+       ローカル変数で作ると ARC に即破棄されて鳴らないので、クラスプロパティで保持する。 */
+    static let synthesizer = AVSpeechSynthesizer()
+
+    /// 読み上げを止める（バックグラウンド・アプリ終了・新しい判定の前）
+    static func stopSpeaking() {
+        if synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+    }
+
+    /// アプリの言語コード（ja / zh-Hans …）を BCP-47 に直す。
+    static func bcp47(_ raw: String?) -> String {
+        let value = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return "en-US" }
+        let tags: [String: String] = [
+            "ja": "ja-JP", "en": "en-US", "zh": "zh-CN", "zh-hans": "zh-CN", "zh-hant": "zh-TW",
+            "ko": "ko-KR", "es": "es-ES", "pt": "pt-BR", "fr": "fr-FR", "de": "de-DE",
+            "it": "it-IT", "th": "th-TH", "id": "id-ID", "ar": "ar-SA"
+        ]
+        if let mapped = tags[value.lowercased()] { return mapped }
+        if value.contains("-") || value.contains("_") { return value.replacingOccurrences(of: "_", with: "-") }
+        return "en-US"
+    }
 
     @objc public func activate(_ call: CAPPluginCall) {
         AppDelegate.activateAudioSession()
         let session = AVAudioSession.sharedInstance()
         call.resolve([
             "category": session.category.rawValue,
-            "active": session.isOtherAudioPlaying
+            "active": session.category == .playback
         ])
     }
 
     /// アプリを離れるときに Web 側からも呼べる（Dynamic Island のスピーカー印を消す）
     @objc public func deactivate(_ call: CAPPluginCall) {
+        ShootoutAudioPlugin.stopSpeaking()
         AppDelegate.deactivateAudioSession()
         call.resolve(["active": false])
+    }
+
+    /* Build 5: 「ゴール！」「セーブ！」「ミスキック！」を人の声で叫ぶ。
+       WebAudio のフォルマント合成では言葉として聞き取れず、歓声に埋もれていた。
+       引数: text（読み上げる言葉・絵文字は Web 側で除去済み）、language（ja / en / zh-Hans …）
+       発声の前に Audio Session を .playback + .mixWithOthers で確実に起こし、
+       前の判定の声が残っていれば止めてから、新しい言葉を鳴らす。 */
+    @objc public func speak(_ call: CAPPluginCall) {
+        let raw = (call.getString("text") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else {
+            call.resolve(["spoken": false, "reason": "empty"])
+            return
+        }
+        let language = ShootoutAudioPlugin.bcp47(call.getString("language"))
+        /* 音声セッションが止まっていても、ここで必ず起こし直す */
+        _ = AppDelegate.activateAudioSessionOnce()
+        let synthesizer = ShootoutAudioPlugin.synthesizer
+        synthesizer.stopSpeaking(at: .immediate)
+        let utterance = AVSpeechUtterance(string: raw)
+        /* その言語の声が端末に無ければ英語で読む（無音にしない） */
+        utterance.voice = AVSpeechSynthesisVoice(language: language)
+            ?? AVSpeechSynthesisVoice(language: "en-US")
+        utterance.volume = 1.0
+        /* 元気に・少し高めに（スタジアムのアナウンスのように） */
+        utterance.rate = min(AVSpeechUtteranceMaximumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * 1.04)
+        utterance.pitchMultiplier = 1.06
+        utterance.preUtteranceDelay = 0
+        utterance.postUtteranceDelay = 0
+        synthesizer.speak(utterance)
+        call.resolve([
+            "spoken": true,
+            "language": language,
+            "text": raw,
+            "speaking": synthesizer.isSpeaking
+        ])
     }
 }
 

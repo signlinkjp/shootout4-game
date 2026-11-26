@@ -110,6 +110,8 @@ export function matchView({ t, prefs, state, language, online = false, roomLabel
           <span class="chip chip--kicker" id="kicker-chip" data-testid="kicker">
             ${esc(t('kicker'))} ${kickerNo}${myKicker ? ` · ${esc(myKicker.name)} · ${esc(footLabel(t, myKicker.foot))}` : ''}
           </span>
+          <!-- Build 5: キーパーの番だけ、方向の選び方（映っている画面のまま）を小さく添える -->
+          <p class="dirhint" id="dir-hint" data-testid="keeper-dir-hint" hidden>${esc(t('keeperDirHint'))}</p>
         </div>
         <div class="stage__tools">
           <button type="button" class="iconbtn iconbtn--small stage__tool" data-action="toggle-sound" data-testid="match-sound"

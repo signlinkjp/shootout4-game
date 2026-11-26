@@ -237,7 +237,8 @@ test('バックグラウンドで音を止め、戻ったら再開する（Web +
   const main = read('src/main.js');
   assert.match(main, /visibilitychange/);
   assert.match(main, /pagehide/);
-  assert.match(main, /addEventListener\('blur'/);
+  /* Build 5: blur（共有シート・課金シート・通知）では止めない（音が消える原因だった） */
+  assert.equal(/addEventListener\('blur'/.test(main), false);
   assert.match(main, /suspendForBackground\(\)/);
   assert.match(main, /pauseRound\(\)/);
   const swift = read('ios/App/App/AppDelegate.swift');

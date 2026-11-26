@@ -27,6 +27,10 @@ const state = {
   voices: {},
   lastVoice: null,
   recoveries: 0,
+  /* Build 5: バックグラウンドから戻った最初の操作で、1回だけ強制的に音を起こし直す */
+  needsGestureRecovery: false,
+  /* Build 5: ボイスをどの経路で鳴らしたか（native = iOS の AVSpeechSynthesizer / browser = speechSynthesis / formant = 合成） */
+  speech: { native: 0, browser: 0, formant: 0, silent: 0 },
 };
 
 const AC = () => (typeof window === 'undefined' ? null : window.AudioContext || window.webkitAudioContext);
@@ -46,59 +50,84 @@ function bus(name, volume) {
 const SILENT_WAV =
   'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
 
+/**
+ * AudioContext とバス（master / sfx / music / crowd）を作り直す。
+ * Build 5: iOS で `closed` になってしまったときは、新しい Context を張り直す。
+ */
+function createContext() {
+  const Ctor = AC();
+  if (!Ctor) return false;
+  try {
+    state.ctx = new Ctor({ latencyHint: 'interactive' });
+  } catch {
+    state.ctx = null;
+    return false;
+  }
+  state.master = state.ctx.createGain();
+  state.master.gain.value = 1;
+  state.master.connect(state.ctx.destination);
+  /* 古いバス・ノードは新しい Context のものではないので作り直す */
+  state.sfxBus = null;
+  state.musicBus = null;
+  state.crowdBus = null;
+  bus('sfxBus', 1);
+  bus('musicBus', 0.45);
+  bus('crowdBus', 0.95);
+  state.noise = null;
+  state.crowdSource = null;
+  state.crowdGain = null;
+  state.crowdFilter = null;
+  applyVolumes();
+  return true;
+}
+
+/** 無音の1サンプルを実際に再生する（WKWebView のオーディオパイプラインを起こす） */
+function silentPoke() {
+  const ctx = state.ctx;
+  if (!ctx) return false;
+  try {
+    const buffer = ctx.createBuffer(1, 1, 22050);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start(0);
+    return true;
+  } catch {
+    /* 起こせなくても次の操作で再挑戦する */
+    return false;
+  }
+}
+
+/** 設定の ON/OFF を、いまのバスに当て直す */
+function applyVolumes() {
+  const ctx = state.ctx;
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  state.sfxBus?.gain.setTargetAtTime(state.settings.sound ? 1 : 0.0001, now, 0.05);
+  state.musicBus?.gain.setTargetAtTime(state.settings.bgm ? 0.42 : 0.0001, now, 0.08);
+  state.crowdBus?.gain.setTargetAtTime(state.settings.sound ? 0.92 : 0.0001, now, 0.08);
+}
+
 export function unlockAudio() {
   try {
-    if (!state.ctx) {
-      const Ctor = AC();
-      if (!Ctor) return false;
-      state.ctx = new Ctor({ latencyHint: 'interactive' });
-      state.master = state.ctx.createGain();
-      state.master.gain.value = 1;
-      state.master.connect(state.ctx.destination);
-      bus('sfxBus', 1);
-      bus('musicBus', 0.45);
-      bus('crowdBus', 0.95);
-      state.noise = null;
+    /* Build 5: AudioContext が closed になっていたら作り直す（バスも張り直す） */
+    if (!state.ctx || state.ctx.state === 'closed') {
+      if (!createContext()) return false;
     }
     /* resume() は環境によっては返ってこない。await せずに走らせる
        （音が鳴らなくてもゲームは止めない） */
-    if (state.ctx.state === 'suspended') {
+    if (state.ctx.state !== 'running') {
       state.ctx.resume().catch(() => {});
     }
     /* iOS: 無音の1サンプルを実際に再生して AudioContext を起こす
        （Build 1 はここが無く、実機で音が出なかった） */
-    try {
-      const buffer = state.ctx.createBuffer(1, 1, 22050);
-      const source = state.ctx.createBufferSource();
-      source.buffer = buffer;
-      source.connect(state.ctx.destination);
-      source.start(0);
-    } catch {
-      /* 起こせなくても次の操作で再挑戦する */
-    }
+    silentPoke();
     /* iOS: アプリ側の Audio Session を playback にする（AppDelegate のブリッジ） */
-    if (typeof navigator !== 'undefined' && navigator.audioSession) {
-      try {
-        navigator.audioSession.type = 'playback';
-      } catch {
-        /* 未対応 */
-      }
-    }
+    activateBridge();
     if (!state.unlocked) {
       state.unlocked = true;
-      try {
-        const audio = new Audio(SILENT_WAV);
-        audio.loop = true;
-        audio.volume = 0.001;
-        audio.play().catch(() => {});
-        state.silent = audio;
-      } catch {
-        /* 下支えが無くても鳴る */
-      }
+      ensureSilentAudio();
     }
-    const cap = typeof window !== 'undefined' ? window.Capacitor : null;
-    const bridge = cap && cap.Plugins && cap.Plugins.ShootoutAudio;
-    if (bridge && typeof bridge.activate === 'function') bridge.activate().catch(() => {});
     return true;
   } catch {
     return false;
@@ -108,10 +137,7 @@ export function unlockAudio() {
 export function configureAudio(settings) {
   state.settings = { ...state.settings, ...settings };
   if (!state.ctx) return;
-  const now = state.ctx.currentTime;
-  state.sfxBus?.gain.setTargetAtTime(state.settings.sound ? 1 : 0.0001, now, 0.05);
-  state.musicBus?.gain.setTargetAtTime(state.settings.bgm ? 0.42 : 0.0001, now, 0.08);
-  state.crowdBus?.gain.setTargetAtTime(state.settings.sound ? 0.92 : 0.0001, now, 0.08);
+  applyVolumes();
   if (state.settings.bgm) startMusic();
   else stopMusic();
 }
@@ -279,14 +305,15 @@ export function purchaseChime(ok = true) {
 }
 
 /* ------------------------------------------------------------------ *\
- * ボイス（ゴール！ / セーブ！ / ミス！）— Build 4
+ * ボイス（ゴール！ / セーブ！ / ミスキック！）— Build 4 / Build 5 で人の声に
  *
- * 着弾の瞬間に、判定を言葉で叫ぶ。iOS の WKWebView でも確実に鳴るよう、
- * 音源ファイルにも SpeechSynthesis の声質差にも頼らず、WebAudio の
- * フォルマント合成（のこぎり波 + 2つのバンドパス）で作る。
- * 母音は表示中の言語の単語から拾うので、12言語それぞれの響きになる。
- * 既存の効果音・歓声の後ろに 0.16 秒遅らせて重ねる（音が割れない）。
- * 設定（prefs.sound）が OFF のときは鳴らさない。
+ * 着弾の瞬間に、判定を言葉で叫ぶ。Build 4 は WebAudio のフォルマント合成
+ * だけだったため、言葉として聞き取れず歓声に埋もれていた。Build 5 は次の順で鳴らす:
+ *   1. iOS（Capacitor）… ShootoutAudio プラグインの speak（AVSpeechSynthesizer）
+ *   2. ブラウザ……… window.speechSynthesis（声がある環境だけ）＋ 補助のフォルマント
+ *   3. どちらも無い…… フォルマント合成だけ（必ず何か鳴らす）
+ * どの経路でも state.voices / state.lastVoice に記録を残す（テストと検証用）。
+ * 設定（prefs.sound）が OFF のときは鳴らさない。絵文字・記号は読ませない。
  * ------------------------------------------------------------------ */
 
 /** 母音のフォルマント（F1, F2）。声の「あいうえお」を作る2つの共鳴周波数。 */
@@ -299,7 +326,89 @@ const VOWEL_FORMANTS = {
   n: [260, 1100],
 };
 
-/* カタカナ → 母音（日本語の単語から母音を取るため） */
+/** 読み上げに使える文字（文字・数字・空白・アポストロフィ・ハイフン）だけを残す */
+const UNSPEAKABLE = /[^\p{L}\p{N}\s'’ʼ\-]/gu;
+
+/**
+ * 発話用のテキスト。絵文字・記号を落とす。
+ * 「ゴール！」→「ゴール」、「MISS KICK 😭💦」→「MISS KICK」。
+ */
+export function speakableText(text) {
+  return String(text == null ? '' : text)
+    .replace(UNSPEAKABLE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** アプリの言語コード（ja / zh-Hans …）→ 読み上げの BCP-47 タグ */
+const SPEECH_TAGS = {
+  ja: 'ja-JP',
+  en: 'en-US',
+  zh: 'zh-CN',
+  'zh-Hans': 'zh-CN',
+  'zh-Hant': 'zh-TW',
+  ko: 'ko-KR',
+  es: 'es-ES',
+  pt: 'pt-BR',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  it: 'it-IT',
+  th: 'th-TH',
+  id: 'id-ID',
+  ar: 'ar-SA',
+};
+
+export function speechTag(language) {
+  const raw = String(language || '').trim();
+  if (!raw) return 'en-US';
+  if (SPEECH_TAGS[raw]) return SPEECH_TAGS[raw];
+  const base = raw.split(/[-_]/)[0].toLowerCase();
+  if (SPEECH_TAGS[base]) return SPEECH_TAGS[base];
+  if (raw.includes('-')) return raw;
+  return 'en-US';
+}
+
+/** iOS の AVSpeechSynthesizer（Capacitor プラグイン）。無い環境では false */
+function nativeSpeak(text, language) {
+  const cap = typeof window !== 'undefined' ? window.Capacitor : null;
+  const bridge = cap && cap.Plugins && cap.Plugins.ShootoutAudio;
+  if (!bridge || typeof bridge.speak !== 'function') return false;
+  try {
+    const answer = bridge.speak({ text, language: String(language || 'en') });
+    if (answer && typeof answer.catch === 'function') answer.catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** ブラウザの speechSynthesis。声が1つも無い環境（ヘッドレス等）では使わない */
+function browserSpeak(text, tag) {
+  const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+  if (!synth || typeof synth.speak !== 'function') return false;
+  try {
+    const voices = typeof synth.getVoices === 'function' ? synth.getVoices() : null;
+    if (!voices || !voices.length) return false;
+    if (typeof synth.cancel === 'function') synth.cancel();
+    const Utterance = typeof window.SpeechSynthesisUtterance === 'function' ? window.SpeechSynthesisUtterance : null;
+    if (!Utterance) return false;
+    const utterance = new Utterance(text);
+    utterance.lang = tag;
+    utterance.volume = 1;
+    utterance.rate = 1.02;
+    utterance.pitch = 1.06;
+    const lower = tag.toLowerCase();
+    const match = voices.find((voice) => String(voice.lang || '').toLowerCase() === lower)
+      || voices.find((voice) => String(voice.lang || '').toLowerCase().startsWith(lower.split('-')[0]));
+    if (match) utterance.voice = match;
+    synth.speak(utterance);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* カタカナ → 母音（フォルマント合成のフォールバック用） */
 const KANA_ROWS = [
   ['アカサタナハマヤラワガザダバパァャヮ', 'a'],
   ['イキシチニヒミリギジヂビピィ', 'i'],
@@ -364,6 +473,21 @@ function syllable({ vowel, at, dur, gain, from, to }) {
   noise({ dur: 0.028, gain: gain * 0.55, low: 500, high: 2600, delay: Math.max(0, at - ctx.currentTime) });
 }
 
+/** 検証用: どの発声経路が使えるか（native = iOS の AVSpeechSynthesizer） */
+export function audioSupport() {
+  const cap = typeof window !== 'undefined' ? window.Capacitor : null;
+  const bridge = cap && cap.Plugins && cap.Plugins.ShootoutAudio;
+  let browser = false;
+  try {
+    const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+    const voices = synth && typeof synth.getVoices === 'function' ? synth.getVoices() : null;
+    browser = Boolean(synth && typeof synth.speak === 'function' && voices && voices.length);
+  } catch {
+    browser = false;
+  }
+  return { native: Boolean(bridge && typeof bridge.speak === 'function'), browser };
+}
+
 /** テスト用: 言葉から拾う母音（12言語の単語が声になるか） */
 export function voiceVowels(text, fallback = ['o', 'o', 'u']) {
   return vowelPattern(text, fallback);
@@ -371,31 +495,64 @@ export function voiceVowels(text, fallback = ['o', 'o', 'u']) {
 
 /**
  * 判定のボイス。kind = 'goal' | 'save' | 'miss'、text は表示中の言語の単語。
- * 鳴らしたら { kind, vowels } を返す（鳴らせなければ null）。
+ * 1. iOS ネイティブ（AVSpeechSynthesizer）→ 2. ブラウザの speechSynthesis
+ * → 3. フォルマント合成 の順で、必ずどれかで鳴らす。
+ * 鳴らしたら { kind, vowels, spoken } を返す（音OFFなら null）。
  */
 export function voice(kind, { text = '', language = '' } = {}) {
   if (!state.settings.sound) return null;
   const contour = VOICE_CONTOUR[kind];
-  if (!contour || !state.ctx) return null;
-  const vowels = vowelPattern(text, contour.fallback);
-  const start = state.ctx.currentTime + 0.16;
-  let cursor = start;
-  vowels.forEach((vowel, index) => {
-    const dur = contour.durs[Math.min(index, contour.durs.length - 1)];
-    const span = (contour.to - contour.from) / Math.max(1, vowels.length);
-    syllable({
-      vowel,
-      at: cursor,
-      dur,
-      gain: contour.gain * (index === vowels.length - 1 ? 1 : 0.86),
-      from: contour.from + span * index,
-      to: contour.from + span * (index + 1),
+  if (!contour) return null;
+  /* 絵文字・記号は読み上げさせない（「ゴール！」→「ゴール」） */
+  const clean = speakableText(text);
+  const vowels = vowelPattern(clean || text, contour.fallback);
+
+  /* 1. iOS のネイティブ発声。鳴らせたらフォルマントは重ねない（二重の声になる） */
+  let spoken = 'none';
+  if (clean && nativeSpeak(clean, language)) {
+    spoken = 'native';
+    state.speech.native += 1;
+  } else if (clean && browserSpeak(clean, speechTag(language))) {
+    /* 2. ブラウザの音声合成。聞こえ方を補うため、小さめのフォルマントを重ねる */
+    spoken = 'browser';
+    state.speech.browser += 1;
+  }
+
+  /* 3. フォルマント合成（ネイティブのときは鳴らさない） */
+  if (spoken !== 'native' && state.ctx) {
+    const scale = spoken === 'browser' ? 0.45 : 1;
+    const start = state.ctx.currentTime + 0.16;
+    let cursor = start;
+    vowels.forEach((vowel, index) => {
+      const dur = contour.durs[Math.min(index, contour.durs.length - 1)];
+      const span = (contour.to - contour.from) / Math.max(1, vowels.length);
+      syllable({
+        vowel,
+        at: cursor,
+        dur,
+        gain: contour.gain * scale * (index === vowels.length - 1 ? 1 : 0.86),
+        from: contour.from + span * index,
+        to: contour.from + span * (index + 1),
+      });
+      cursor += dur * 0.92;
     });
-    cursor += dur * 0.92;
-  });
+    if (spoken === 'none') {
+      spoken = 'formant';
+      state.speech.formant += 1;
+    }
+  }
+  if (spoken === 'none') state.speech.silent += 1;
+
   state.voices[kind] = (state.voices[kind] || 0) + 1;
-  state.lastVoice = { kind, vowels: vowels.join(''), language: String(language || ''), at: Date.now() };
-  return { kind, vowels };
+  state.lastVoice = {
+    kind,
+    vowels: vowels.join(''),
+    language: String(language || ''),
+    text: clean,
+    spoken,
+    at: Date.now(),
+  };
+  return { kind, vowels, spoken };
 }
 
 /* ------------------------------------------------------------------ *\
@@ -616,25 +773,50 @@ function activateBridge() {
  * タップ・クリック・キー入力のたびに呼ぶ安全策。
  * AudioContext が suspend のままなら resume する（戻ってきて最初の操作で音が戻る）。
  */
+/**
+ * タップ・クリック・キー入力のたびに呼ぶ安全策。
+ * Build 5: iOS の WKWebView は、復帰後や割り込み（interrupted）の後に
+ * `ctx.state` が 'running' に見えても音が出ないことがある。なので:
+ *   ！ 状態が running 以外（suspended / interrupted）→ resume + ブリッジ + 無音1サンプル + 下支え
+ *   ！ バックグラウンドから戻った直後の最初の操作 → running に見えても1回だけ同じことを強制する
+ *   ！ ctx が closed → AudioContext を作り直してバスを張り直す
+ */
 export function ensureAudioRunning() {
+  if (!state.ctx) return false;
+  /* closed を生き返らせることはできない。新しい Context を作る */
+  if (state.ctx.state === 'closed') {
+    stopCrowd();
+    stopMusic();
+    if (!createContext()) return false;
+    state.needsGestureRecovery = true;
+  }
+  const force = state.needsGestureRecovery;
+  state.needsGestureRecovery = false;
   const ctx = state.ctx;
-  if (!ctx) return false;
-  if (ctx.state === 'running') {
+  if (!force && ctx.state === 'running') {
     ensureSilentAudio();
     return true;
   }
-  try {
-    ctx.resume().catch(() => {});
-  } catch {
-    return false;
+  if (ctx.state !== 'running') {
+    try {
+      ctx.resume().catch(() => {});
+    } catch {
+      /* closed でもゲームは続ける */
+    }
   }
   activateBridge();
+  silentPoke();
   ensureSilentAudio();
+  /* 復帰の1回だけ、BGMも鳴っていなければ起こし直す（歓声は呼び出し側の判断） */
+  if (force && state.settings.bgm) startMusic();
+  state.recoveries += 1;
   return true;
 }
 
 export function suspendForBackground() {
   state.backgrounded = true;
+  /* Build 5: 戻った後の最初の操作で、必ず一度は音の経路を起こし直す */
+  state.needsGestureRecovery = true;
   stopCrowd();
   stopMusic();
   try {
@@ -654,6 +836,14 @@ export function suspendForBackground() {
 export function resumeFromBackground({ crowd = false } = {}) {
   const wasBackground = state.backgrounded;
   state.backgrounded = false;
+  /* Build 5: 戻った直後の最初のユーザー操作で、もう一度パイプラインを起こす */
+  state.needsGestureRecovery = true;
+  /* closed になっていたら作り直す（バスも張り直す） */
+  if (state.ctx && state.ctx.state === 'closed') {
+    stopCrowd();
+    stopMusic();
+    createContext();
+  }
   const ctx = state.ctx;
   if (!ctx) {
     /* まだ一度も音を起こしていない（初回起動） */
@@ -671,6 +861,8 @@ export function resumeFromBackground({ crowd = false } = {}) {
   };
   resume();
   setTimeout(resume, 140);
+  /* 2b. 無音1サンプル（これがないと iOS で復帰後も無音のままになることがある） */
+  silentPoke();
   /* 3. 無音の下支え（消えていたら作り直す） */
   ensureSilentAudio();
   /* 4. BGM・歓声 */
@@ -692,6 +884,8 @@ export function audioState() {
     backgrounded: Boolean(state.backgrounded),
     voice: state.lastVoice ? { ...state.lastVoice } : null,
     voices: { ...state.voices },
+    speech: { ...state.speech },
+    needsGestureRecovery: Boolean(state.needsGestureRecovery),
     silent: Boolean(state.silent),
     recoveries: state.recoveries,
   };

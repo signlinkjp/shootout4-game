@@ -464,9 +464,11 @@ function hideHandover() {
 /** キーパーの番だけ、3D画面の上に「左右に動かせる」領域を出す */
 function updateKeeperControls() {
   const zone = $('#keeper-zone');
-  if (!zone) return;
   const active = Boolean(match && match.role === 'keep' && !match.confirmed && !match.handover);
-  zone.hidden = !active;
+  if (zone) zone.hidden = !active;
+  /* Build 5: 「映っている画面のままの向きで選ぶ」短い案内も、キーパーの番だけ出す */
+  const hint = $('#dir-hint');
+  if (hint) hint.hidden = !active;
 }
 
 function startTimer(remaining = CONFIG.roundSeconds * 1000) {
@@ -699,7 +701,8 @@ function applyKick(shot, save, { timeout = false, stuck = false } = {}) {
 
   if (timeout) setKickStatus(t(event.miss ? 'timeoutMiss' : event.stuck ? 'timeoutStuck' : 'timeoutMiss'));
 
-  /* 判定のボイス（ゴール！/ セーブ！/ ミス！）は着弾に合わせて鳴らす */
+  /* 判定のボイス（ゴール！/ セーブ！/ ミスキック！）は着弾に合わせて鳴らす。
+     絵文字（goal / save / missKick の表示文に入っている）は audio.js 側で落として読ませる。 */
   const announce = () => {
     const text = bannerKind === 'miss' ? t('voiceMiss') : t(bannerKind === 'goal' ? 'goal' : 'save');
     voice(bannerKind, { text, language: prefs.language });
@@ -1789,7 +1792,13 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', onAppHidden);
 window.addEventListener('pageshow', () => { if (!document.hidden) onAppVisible(); });
-window.addEventListener('blur', onAppHidden);
+/*
+ * Build 5: `blur` では止めない。共有シート・StoreKitの課金シート・
+ * コントロールセンター・通知が開いただけで AudioContext を suspend してしまい、
+ * 戻ったときに音が出なくなっていた。バックグラウンドは visibilitychange（document.hidden）
+ * と pagehide、および Swift 側の applicationWillResignActive / applicationDidEnterBackground
+ * で十分。`focus` は「隠れていたのに戻った」場合の保険として残す。
+ */
 window.addEventListener('focus', () => { if (!document.hidden) onAppVisible(); });
 
 /*
@@ -1902,7 +1911,10 @@ window.__SHOOTOUT__ = {
   refreshRank: () => { refreshRank(); return rankRows.length; },
   shareText: () => (match ? buildShareText({ t, state: match.state, prefs, language: prefs.language }) : ''),
   share: () => shareResult(),
-  voice: (kind, text) => voice(kind || 'goal', { text: text || t('goal'), language: prefs.language }),
+  voice: (kind, text, language) => voice(kind || 'goal', {
+    text: text == null ? t(kind === 'miss' ? 'voiceMiss' : (kind === 'save' ? 'save' : 'goal')) : text,
+    language: language || prefs.language,
+  }),
   ensureAudio: () => ensureAudioRunning(),
   get preview() { return lockerPreview ? lockerPreview.snapshot() : { available: false }; },
   appHidden: (value) => (value ? onAppHidden() : onAppVisible()),

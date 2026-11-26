@@ -603,18 +603,20 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     { x: -7.0, z: 4.3 }, { x: -5.75, z: 4.15 }, { x: -4.5, z: 4.0 }, { x: -3.3, z: 3.9 }, { x: -2.15, z: 3.8 },
   ];
   /*
-   * 助走（Build 4）。利き足で助走の側・角度・蹴り足をはっきり分ける。
-   *   右利き … ボールの左から入り、右足で振り抜く（軸足は左）
-   *   左利き … ボールの右から入り、左足で振り抜く（軸足は右）
+   * 助走（Build 4 / Build 5 で蹴り足の左右を修正）。利き足で助走の側・角度・蹴り足をはっきり分ける。
+   *   右利き … ボールの左後方（画面左 -X）から入り、右足（legs[0]）で振り抜く（軸足は左足）
+   *   左利き … ボールの右後方（画面右 +X）から入り、左足（legs[1]）で振り抜く（軸足は右足）
+   * キャラクターは +Z が正面なので、脚は legs[0] = 右足（side -1）/ legs[1] = 左足（side +1）。
+   * side は「ボールから見て入る側」（画面の左右）、kickLeg / supportLeg は parts.legs の添字。
    * どの値もモーションだけに使う（判定・確率には触らない）。
    */
   const RUN_UP = {
     right: {
-      foot: 'right', side: -1, kickLeg: 1, supportLeg: 0,
+      foot: 'right', side: -1, kickLeg: 0, supportLeg: 1,
       startX: -1.35, startZ: 3.55, plantX: -0.36, plantZ: 2.62, facing: Math.PI * 0.93,
     },
     left: {
-      foot: 'left', side: 1, kickLeg: 0, supportLeg: 1,
+      foot: 'left', side: 1, kickLeg: 1, supportLeg: 0,
       startX: 1.35, startZ: 3.55, plantX: 0.36, plantZ: 2.62, facing: Math.PI * 1.07,
     },
   };
