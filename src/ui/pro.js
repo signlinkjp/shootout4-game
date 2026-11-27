@@ -43,7 +43,6 @@ export function proView({ t, entitled, language, diagnostic, price }) {
       ${statusLine('', '')}
       <p class="mini mini--center" id="pro-status" role="status" aria-live="polite"></p>
       ${diagnostic ? `<p class="mini mini--center mono">${esc(t('proDiag'))}: ${esc(diagnostic)}</p>` : ''}
-      <p class="mini mini--center">${esc(t('proMockNote'))}</p>
     `,
   });
 }

@@ -1,6 +1,6 @@
 # SHOOTOUT 4 — IPKSF World Penalty Championship
 
-iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 12）。
+iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 13）。
 `クイック対戦`・`CPU対戦`・`フレンド対戦`・`世界ランキング`・`ロッカー（キャラクター＋4部位）`・
 `IPKSF 公式加盟（PRO・買い切り ¥300）` を、Capacitor 8 + 素の HTML/CSS/JS（ES Modules）で実装しています。
 
@@ -148,6 +148,8 @@ npx cap sync ios            # www → ios/App/App/public
 
 ## バージョン
 
+- v1.0.0 / Build 13（2026-11-28）
+  - **PRO 画面のテスト購入注記を削除**：本番（StoreKit 2）ビルドでも PRO 画面の一番下に「プレビュー版のため、いまの購入はテスト動作です（請求は発生しません）。」が出ていたため、文言（`proMockNote`・12言語）ごと削除した。設定画面に出ていた同じ注記も削除（PRO 加盟中の表示だけ残す）。PRO 画面は価格・特典・購入/復元ボタン・ストアの応答だけの構成になった
 - v1.0.0 / Build 12（2026-11-28）
   - **国内戦のクイックマッチが「相手を探しています」のまま進まない不具合を修正**
     - **待機部屋をユニフォーム国で分けていた**：`openQuick()` が着用ユニフォームの国（`prefs.country`）をそのまま部屋名に渡していたため、同じ日本にいても「日本ユニフォーム」と「ブラジルユニフォーム」の2人が `shootout-quick:JP:domestic` と `shootout-quick:BR:domestic` に分かれ、一生出会えなかった。国内戦の部屋はアプリの言語/地域（`domesticRegion`: ja→`JP`・ko→`KR`・zh-Hant→`TW`・zh-Hans→`CN`・en→`EN` など、言語が分からないときだけ端末の時間帯から推測）で決めるようにした。表示カードの国旗はこれまでどおり着用ユニフォーム国

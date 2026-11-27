@@ -195,7 +195,7 @@ export function settingsView({ t, prefs, entitled, registered = false, languages
         <button class="btn btn--ghost btn--block" data-action="replay-intro">${esc(t('replayIntro'))}</button>
         <button class="btn btn--ghost btn--block" data-action="restore">${esc(t('restorePurchases'))}</button>
         <button class="btn btn--danger btn--block" data-action="reset-all">${esc(t('resetAll'))}</button>
-        <p class="mini">${esc(entitled ? t('proActive') : t('proMockNote'))}</p>
+        ${entitled ? `<p class="mini">${esc(t('proActive'))}</p>` : ''}
         <p class="mini mono">SHOOTOUT 4 · V${CONFIG.version} · BUILD ${CONFIG.build} · ${esc(CONFIG.bundleId)}</p>
       </section>
     `,

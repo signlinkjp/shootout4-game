@@ -43,7 +43,6 @@ export const BASE = {
     proMember: 'PRO 加盟中', proNonMember: '未加盟',
     proPending: '購入の確認待ちです', proFailed: '購入できませんでした',
     proRestored: '購入を復元しました', proNothing: '復元できる購入がありません',
-    proMockNote: 'プレビュー版のため、いまの購入はテスト動作です（請求は発生しません）。',
     proDiag: 'ストアの応答',
 
     onlineTitle: '通信対戦', quickMatch: 'クイックマッチ', friendRoom: 'フレンド対戦',
@@ -211,7 +210,6 @@ export const BASE = {
     proMember: 'PRO member', proNonMember: 'Not a member',
     proPending: 'Purchase is pending', proFailed: 'Purchase did not complete',
     proRestored: 'Purchase restored', proNothing: 'No purchase to restore',
-    proMockNote: 'Preview build: purchases here are test unlocks and never charge you.',
     proDiag: 'Store response',
 
     onlineTitle: 'Online', quickMatch: 'Quick match', friendRoom: 'Friend match',
@@ -379,7 +377,6 @@ export const BASE = {
     proMember: 'PRO 会员', proNonMember: '未加入',
     proPending: '购买待确认', proFailed: '购买未完成',
     proRestored: '已恢复购买', proNothing: '没有可恢复的购买',
-    proMockNote: '预览版：此处的购买为测试解锁，不会产生费用。',
     proDiag: '商店回应',
 
     onlineTitle: '联机对战', quickMatch: '快速匹配', friendRoom: '好友对战',
@@ -547,7 +544,6 @@ export const BASE = {
     proMember: 'PRO 會員', proNonMember: '未加入',
     proPending: '購買待確認', proFailed: '購買未完成',
     proRestored: '已恢復購買', proNothing: '沒有可恢復的購買',
-    proMockNote: '預覽版：此處的購買為測試解鎖，不會產生費用。',
     proDiag: '商店回應',
 
     onlineTitle: '連線對戰', quickMatch: '快速配對', friendRoom: '好友對戰',
@@ -715,7 +711,6 @@ export const BASE = {
     proMember: 'PRO 가입 중', proNonMember: '미가입',
     proPending: '구매 확인 대기 중', proFailed: '구매하지 못했습니다',
     proRestored: '구매를 복원했습니다', proNothing: '복원할 구매가 없습니다',
-    proMockNote: '미리보기 버전이라 지금의 구매는 테스트 해금이며 청구되지 않습니다.',
     proDiag: '스토어 응답',
 
     onlineTitle: '온라인 대전', quickMatch: '빠른 매치', friendRoom: '친구 대전',

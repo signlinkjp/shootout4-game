@@ -34,16 +34,16 @@ const read = (path) => readFileSync(resolve(ROOT, path), 'utf8');
  * 1. ビルド番号
  * ------------------------------------------------------------------ */
 
-test('Build 12 / v1.0.0 が全ファイルで揃っている', () => {
+test('Build 13 / v1.0.0 が全ファイルで揃っている', () => {
   assert.equal(CONFIG.version, '1.0.0');
-  assert.equal(CONFIG.build, 12);
+  assert.equal(CONFIG.build, 13);
   const pbx = read('ios/App/App.xcodeproj/project.pbxproj');
-  assert.deepEqual([...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((m) => m[1]), ['12', '12']);
-  assert.match(read('package.json'), /Build 12/);
-  assert.match(read('README.md'), /Build 12/);
-  assert.match(read('README.md'), /v1\.0\.0 \/ Build 12/);
-  assert.match(read('docs/ios-testflight.yml'), /TestFlight Build 12/);
-  assert.match(read('docs/testflight-setup.md'), /\*\*12\*\*/);
+  assert.deepEqual([...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((m) => m[1]), ['13', '13']);
+  assert.match(read('package.json'), /Build 13/);
+  assert.match(read('README.md'), /Build 13/);
+  assert.match(read('README.md'), /v1\.0\.0 \/ Build 13/);
+  assert.match(read('docs/ios-testflight.yml'), /TestFlight Build 13/);
+  assert.match(read('docs/testflight-setup.md'), /\*\*13\*\*/);
 });
 
 /* ------------------------------------------------------------------ *\

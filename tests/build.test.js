@@ -5,7 +5,10 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
-import { CONFIG } from '../src/config.js';
+import { CONFIG, DEFAULT_PREFS } from '../src/config.js';
+import { DICT, LANGUAGES, tr } from '../src/i18n.js';
+import { proView } from '../src/ui/pro.js';
+import { settingsView } from '../src/ui/misc.js';
 import { KEEPER_SYNC_MS } from '../src/net/online.js';
 import { CHARACTERS } from '../src/core/skins.js';
 import { COUNTRIES, FREE_COUNTRIES, PRO_COUNTRIES } from '../src/core/countries.js';
@@ -26,24 +29,41 @@ function pngHeader(path) {
   };
 }
 
-test('Build 12 / v1.0.0 に全ファイルのビルド番号が揃っている', () => {
+test('Build 13 / v1.0.0 に全ファイルのビルド番号が揃っている', () => {
   assert.equal(CONFIG.version, '1.0.0');
-  assert.equal(CONFIG.build, 12);
+  assert.equal(CONFIG.build, 13);
 
   const pbx = read('ios/App/App.xcodeproj/project.pbxproj');
   const builds = [...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((match) => match[1]);
-  assert.deepEqual(builds, ['12', '12']);
+  assert.deepEqual(builds, ['13', '13']);
   assert.equal((pbx.match(/MARKETING_VERSION = 1\.0\.0;/g) || []).length, 2);
 
   const pkg = JSON.parse(read('package.json'));
   assert.equal(pkg.version, '1.0.0');
-  assert.match(pkg.description, /Build 12/);
+  assert.match(pkg.description, /Build 13/);
 
-  assert.match(read('src/config.js'), /build: 12/);
+  assert.match(read('src/config.js'), /build: 13/);
   assert.match(read('src/ui/home.js'), /V\$\{CONFIG\.version\} · BUILD \$\{CONFIG\.build\}/);
   assert.match(read('src/ui/misc.js'), /BUILD \$\{CONFIG\.build\}/);
-  assert.match(read('README.md'), /Build 12/);
-  assert.match(read('docs/testflight-setup.md'), /\*\*12\*\*/);
+  assert.match(read('README.md'), /Build 13/);
+  assert.match(read('docs/testflight-setup.md'), /\*\*13\*\*/);
+});
+
+test('Build 13: PRO の「テスト購入」注記（proMockNote）は12言語とも削除され、PRO 画面にも設定画面にも出ない', () => {
+  for (const file of ['src/ui/pro.js', 'src/ui/misc.js', 'src/locales.js', 'src/locales-extra.js']) {
+    assert.doesNotMatch(read(file), /proMockNote/, file);
+  }
+  const noteText = /プレビュー版|Preview build|预览版|預覽版|미리보기|Versión de prueba|Versão de teste|Version d’essai|Testversion|Versione di prova|เวอร์ชันทดลอง|Versi pratinjau|test unlocks/;
+  for (const language of LANGUAGES) {
+    assert.equal(Object.hasOwn(DICT[language], 'proMockNote'), false, language);
+    const t = (key) => tr(language, key);
+    for (const entitled of [false, true]) {
+      const pro = proView({ t, entitled, language, diagnostic: '', price: '' });
+      assert.doesNotMatch(pro, noteText, `${language} pro`);
+      const settings = settingsView({ t, prefs: { ...DEFAULT_PREFS, language }, entitled });
+      assert.doesNotMatch(settings, noteText, `${language} settings`);
+    }
+  }
 });
 
 test('アイコンは IPKSF 公式エンブレムで、iOS と assets が同一（旧アイコンが残っていない）', () => {
@@ -72,11 +92,11 @@ test('アイコンは IPKSF 公式エンブレムで、iOS と assets が同一�
   }
 });
 
-test('配布用 www/ が作れて、ビルド12のアイコンとコードが同期している', async () => {
+test('配布用 www/ が作れて、ビルド13のアイコンとコードが同期している', async () => {
   await makeWww();
   const wwwIcon = pngHeader('www/assets/icon-1024.png');
   assert.equal(wwwIcon.hash, pngHeader('assets/icon-1024.png').hash);
-  assert.match(read('www/src/config.js'), /build: 12/);
+  assert.match(read('www/src/config.js'), /build: 13/);
   assert.match(read('www/src/three/characters.js'), /buildCharacter/);
   assert.match(read('www/src/core/registration.js'), /IPKSF/);
   assert.match(read('www/src/core/ranking.js'), /pointsFor/);
