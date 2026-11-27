@@ -33,12 +33,13 @@ export const KEEPER_RANGE = GOAL_HALF - 0.55;
 /**
  * カメラ（役割で明確に分ける）
  *   shoot … ボールの後ろからゴールを見る（蹴る側）
- *   keep  … ゴールの斜め後ろ・高めに引いて、ゴール全体と相手キッカーとボールが
- *           1画面に入る（Build 1 の「近すぎる」を解消）
+ *   keep  … ゴールの真後ろ（x = 0）・高めに引いて、ゴール全体と相手キッカーと
+ *           ボールが1画面に入る（Build 9: 斜め後ろから真後ろへ。左右の駆け引きが
+ *           画面の左右とそのまま対応する）
  */
 const CAMERAS = {
   shoot: { pos: new THREE.Vector3(0, 3.3, 7.6), look: new THREE.Vector3(0, 1.2, -7.4), fov: 52 },
-  keep: { pos: new THREE.Vector3(5.2, 5.0, -22.0), look: new THREE.Vector3(0, 0.6, -5.0), fov: 60 },
+  keep: { pos: new THREE.Vector3(0, 4.8, -20.5), look: new THREE.Vector3(0, 0.8, -3.5), fov: 60 },
   hero: { pos: new THREE.Vector3(11.5, 7.4, 13.5), look: new THREE.Vector3(0, 1.4, -5), fov: 52 },
   lineup: { pos: new THREE.Vector3(-4.7, 2.45, 8.1), look: new THREE.Vector3(-4.5, 1.05, 3.7), fov: 52 },
 };

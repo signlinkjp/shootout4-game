@@ -1,10 +1,10 @@
-/** SHOOTOUT 4 — 試合画面（HUD・PKスコアボード・4択・7秒タイマー・キーパーの駆け引き） */
+/** SHOOTOUT 4 — 試合画面（HUD・PKスコアボード・4択・8秒タイマー・キーパーの駆け引き） */
 
 import { CONFIG } from '../config.js';
 import { DIRECTIONS, pkBoard, kickerNumber, phase, mirrorDirection } from '../core/rules.js';
 import { EMOTES, EMOTE_SECTIONS } from '../core/emotes.js';
 import { getCountry, countryName } from '../core/countries.js';
-import { flag, flagEmoji, icon, esc } from './layout.js';
+import { flag, icon, esc } from './layout.js';
 
 export function pkCellList(state, side, t) {
   const board = pkBoard(state);
@@ -215,25 +215,8 @@ function logRow({ t, event, index, mine, meCode, oppCode, kickerFor, language })
   </div>`;
 }
 
-/**
- * 結果のシェア文面（Build 4）。
- * 国旗絵文字・勝敗・PKスコア・サドンデスなら本数・#SHOOTOUT4・IPKSF を1つの文に。
- * 画像は作らない（テキストだけなので軽く、どの環境でも確実に共有できる）。
- */
-export function buildShareText({ t, state, prefs, language }) {
-  const me = getCountry(prefs.country);
-  const oppCode = prefs.opponent || 'BR';
-  const win = state.winner === 'me';
-  const sudden = state.kicks.me.length > CONFIG.kickers || state.kicks.opp.length > CONFIG.kickers;
-  const score = `${state.score.me}-${state.score.opp}`;
-  return [
-    `${flagEmoji(me.code)} ${t(win ? 'victory' : 'defeat')} ${score} ${flagEmoji(oppCode)}`,
-    `${countryName(me.code, language)} vs ${countryName(oppCode, language)}`,
-    sudden ? t('shareSudden', { kicks: Math.max(state.kicks.me.length, state.kicks.opp.length) }) : '',
-    'IPKSF · SHOOTOUT 4',
-    '#SHOOTOUT4 #IPKSF',
-  ].filter(Boolean).join('\n');
-}
+/* 文面は Build 9 から core/share.js（結果カードと同じ場所）に移した。ここからも使える。 */
+export { buildShareText } from '../core/share.js';
 
 export function resultView({ t, state, record, language, prefs, online = false, kickerFor = null }) {
   const me = getCountry(prefs.country);

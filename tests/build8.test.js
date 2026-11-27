@@ -1,5 +1,5 @@
 /**
- * SHOOTOUT 4 — Build 8 の検証
+ * SHOOTOUT 4 — Build 9 の検証（Build 8 の音まわりを含む）
  *
  *  1. ビルド番号 8（v1.0.0）が全ファイルで揃っている
  *  2. 効果音ラボの MP3 6本が assets/sfx にあり、www へ同期される
@@ -32,17 +32,17 @@ const SFX = [
  * 1. ビルド番号
  * ------------------------------------------------------------------ */
 
-test('Build 8 / v1.0.0 が全ファイルで揃っている', () => {
+test('Build 9 / v1.0.0 が全ファイルで揃っている', () => {
   assert.equal(CONFIG.version, '1.0.0');
-  assert.equal(CONFIG.build, 8);
+  assert.equal(CONFIG.build, 9);
   const pbx = read('ios/App/App.xcodeproj/project.pbxproj');
-  assert.deepEqual([...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((m) => m[1]), ['8', '8']);
+  assert.deepEqual([...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((m) => m[1]), ['9', '9']);
   assert.equal((pbx.match(/MARKETING_VERSION = 1\.0\.0;/g) || []).length, 2);
-  assert.match(read('package.json'), /Build 8/);
-  assert.match(read('src/config.js'), /build: 8/);
-  assert.match(read('README.md'), /v1\.0\.0 \/ Build 8/);
-  assert.match(read('docs/testflight-setup.md'), /\*\*8\*\*/);
-  assert.match(read('docs/ios-testflight.yml'), /TestFlight Build 8/);
+  assert.match(read('package.json'), /Build 9/);
+  assert.match(read('src/config.js'), /build: 9/);
+  assert.match(read('README.md'), /v1\.0\.0 \/ Build 9/);
+  assert.match(read('docs/testflight-setup.md'), /\*\*9\*\*/);
+  assert.match(read('docs/ios-testflight.yml'), /TestFlight Build 9/);
 });
 
 /* ------------------------------------------------------------------ *\

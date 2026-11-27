@@ -1,7 +1,7 @@
 /**
  * SHOOTOUT 4 — アプリ本体（画面の切り替え・試合進行・通信・課金）
  *
- * 試合は「7秒＋決定」: 4方向から選び、決定で即座に結果。
+ * 試合は「8秒＋決定」: 4方向から選び、決定で即座に結果。
  * CPUはラウンド開始時に方向を確定しているので、決定した瞬間に両者の手がそろう。
  */
 
@@ -51,7 +51,9 @@ import { createStadium } from './three/stadium.js';
 import { createPreview } from './three/preview.js';
 import { homeView } from './ui/home.js';
 import { countryView } from './ui/country.js';
-import { matchView, resultView, pkCellList, shownDirection, buildShareText } from './ui/match.js';
+import { matchView, resultView, pkCellList, shownDirection } from './ui/match.js';
+import { buildShareText, buildResultCardModel, pickShareStrategy } from './core/share.js';
+import { renderResultCard, resultCardFile } from './ui/result-card.js';
 import { lockerView } from './ui/locker.js';
 import { registerView } from './ui/register.js';
 import { proView } from './ui/pro.js';
@@ -99,6 +101,9 @@ let helpOpen = false;
 let lockerPreview = null;
 let lockerPreviewKey = '';
 let appHidden = false;
+/* Build 9: 結果カードは結果画面を出した直後に裏で作っておく（共有タップの瞬間に
+   Canvas を描き始めると、iOS の「ユーザー操作中に share を呼ぶ」制約に触れうる） */
+let resultCardCache = null;
 
 const t = (key, vars) => tr(prefs.language, key, vars);
 
@@ -197,6 +202,8 @@ function render() {
     updateKeeperControls();
   }
   if (screen === 'locker') attachLockerPreview();
+  /* Build 9: 結果画面を出したら、共有に備えてカードを裏で用意しておく */
+  if (screen === 'result') setTimeout(() => prepareResultCard(), 320);
   document.documentElement.dataset.screen = screen;
   const body = $('.screen__body');
   if (body) body.scrollTop = 0;
@@ -325,6 +332,7 @@ function currentRole() {
  * ------------------------------------------------------------------ */
 
 function startMatch({ onlineMatch = false } = {}) {
+  resultCardCache = null;
   const first = onlineMatch
     ? (session && session.mySide === 'away' ? 'opp' : 'me')
     : (prefs.order === 'second' ? 'opp' : 'me');
@@ -570,7 +578,7 @@ function confirmKick() {
 }
 
 /**
- * 7秒たっても決めていなければ、自動で選ばない。
+ * 8秒たっても決めていなければ、自動で選ばない。
  * 蹴る番なら枠外へ（MISS KICK）、キーパーの番なら動けず失点。
  */
 function autoPick() {
@@ -1157,33 +1165,145 @@ function refreshRank() {
 }
 
 /* ------------------------------------------------------------------ *\
- * 結果のシェア（Build 4）
- *   Web Share API があればそのまま共有、無ければ文面をクリップボードへ。
- *   画像は作らず、テキストだけ（軽い・確実・どこでも動く）。
+ * 結果のシェア（Build 9）
+ *   720×900 の結果カード（PNG）＋文面を共有する。
+ *     1. navigator.share({ files: [png], title, text })   … 画像＋文面（iOS 15+ など）
+ *     2. navigator.share({ title, text })                  … 画像が使えない環境・失敗時
+ *     3. クリップボードへコピー（＋PC では PNG を保存）
+ *     4. どれも無理なら文面をトーストで見せる
+ *   途中で何が起きてもエラーで止まらない（キャンセルだけは静かに終わる）。
  * ------------------------------------------------------------------ */
+
+/** 結果カード（PNG の Blob と File）。作れなければ null */
+async function buildResultCard() {
+  if (!match) return null;
+  try {
+    const date = new Date();
+    const model = buildResultCardModel({
+      state: match.state,
+      prefs,
+      language: prefs.language,
+      t,
+      standing,
+      record,
+      online: Boolean(match.online),
+      date,
+    });
+    const { blob } = await renderResultCard(model);
+    if (!blob) return null;
+    return { model, blob, file: resultCardFile(blob, date) };
+  } catch {
+    return null;
+  }
+}
+
+/** 画像をファイルとして保存できる環境か（タッチ端末では保存UIに任せ、PCだけ落とす） */
+function canDownloadFile() {
+  if (typeof navigator === 'undefined' || typeof document === 'undefined') return false;
+  return !(Number(navigator.maxTouchPoints) > 0);
+}
+
+function downloadBlob(blob, name) {
+  try {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.rel = 'noopener';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** カードの中身が変わる条件（言語・国・スコア・勝敗・勝ち点）。変わったら作り直す */
+function resultCardSignature() {
+  if (!match) return '';
+  const state = match.state;
+  return JSON.stringify({
+    language: prefs.language,
+    country: prefs.country,
+    opponent: prefs.opponent,
+    online: Boolean(match.online),
+    kicks: [state.kicks.me.length, state.kicks.opp.length],
+    score: [state.score.me, state.score.opp],
+    winner: state.winner,
+    points: standing && standing.total ? standing.total.points : null,
+    record: record ? [record.wins, record.losses, record.played] : null,
+  });
+}
+
+/** 結果カードを（まだ無ければ）作る。共有タップ時は、ほぼ待たずに File が返る */
+function prepareResultCard() {
+  if (!match) return Promise.resolve(null);
+  const signature = resultCardSignature();
+  if (resultCardCache && resultCardCache.signature === signature) return resultCardCache.promise;
+  const promise = buildResultCard();
+  resultCardCache = { signature, promise };
+  return promise;
+}
 
 async function shareResult() {
   if (!match) return 'none';
   const text = buildShareText({ t, state: match.state, prefs, language: prefs.language });
   const title = `${CONFIG.title} · ${CONFIG.brand}`;
-  try {
-    if (navigator.share) {
-      await navigator.share({ title, text });
-      return 'shared';
+  const card = await prepareResultCard();
+  const nav = typeof navigator === 'undefined' ? {} : navigator;
+  const hasShare = typeof nav.share === 'function';
+  let canShareFiles = false;
+  if (hasShare && card && card.file) {
+    try {
+      canShareFiles = typeof nav.canShare !== 'function' || Boolean(nav.canShare({ files: [card.file] }));
+    } catch {
+      canShareFiles = false;
     }
-  } catch (error) {
-    /* キャンセルは何もしない。他の失敗はコピーへ切り替える */
-    if (error && error.name === 'AbortError') return 'cancelled';
   }
-  try {
-    await navigator.clipboard.writeText(text);
+  const plan = pickShareStrategy({
+    hasShare,
+    hasFiles: Boolean(card && card.file),
+    canShareFiles,
+    hasClipboard: Boolean(nav.clipboard && typeof nav.clipboard.writeText === 'function'),
+    canDownload: canDownloadFile(),
+  });
+
+  let copied = false;
+  let downloaded = false;
+  for (const step of plan) {
+    try {
+      if (step === 'share-image') {
+        await nav.share({ files: [card.file], title, text });
+        return 'shared-image';
+      }
+      if (step === 'share-text') {
+        await nav.share({ title, text });
+        return 'shared-text';
+      }
+      if (step === 'clipboard') {
+        await nav.clipboard.writeText(text);
+        copied = true;
+        continue;
+      }
+      if (step === 'download' && card) {
+        downloaded = downloadBlob(card.blob, card.file && card.file.name ? card.file.name : 'shootout4-result.png');
+        continue;
+      }
+    } catch (error) {
+      /* キャンセルはそのまま静かに終わる。ほかの失敗は次の手段へ */
+      if (error && error.name === 'AbortError') return 'cancelled';
+    }
+  }
+
+  if (copied) {
     toast(t('copied'));
     return 'copied';
-  } catch {
-    /* クリップボードも使えない環境では、文面をトーストで見せる */
-    toast(text);
-    return 'shown';
   }
+  if (downloaded) return 'saved';
+  toast(text);
+  return 'shown';
 }
 
 /* ------------------------------------------------------------------ *\
@@ -2044,6 +2164,33 @@ window.__SHOOTOUT__ = {
   refreshRank: () => { refreshRank(); return rankRows.length; },
   shareText: () => (match ? buildShareText({ t, state: match.state, prefs, language: prefs.language }) : ''),
   share: () => shareResult(),
+  /* Build 9: 結果カード（検証用にモデルと PNG を取り出せる） */
+  cardModel: () => (match ? buildResultCardModel({
+    state: match.state, prefs, language: prefs.language, t,
+    standing, record, online: Boolean(match.online), date: new Date(),
+  }) : null),
+  cardPng: async () => {
+    const card = await prepareResultCard();
+    if (!card) return null;
+    const dataUrl = await new Promise((resolve) => {
+      try {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(card.blob);
+      } catch {
+        resolve('');
+      }
+    });
+    return {
+      type: card.blob.type,
+      size: card.blob.size,
+      name: card.file && card.file.name ? card.file.name : '',
+      width: card.model.width,
+      height: card.model.height,
+      dataUrl,
+    };
+  },
   /* Build 6: 判定の演出音（音声の読み上げはなし）。返り値は { kind, mode: 'showcase' } */
   voice: (kind) => voice(kind || 'goal'),
   ensureAudio: () => ensureAudioRunning(),

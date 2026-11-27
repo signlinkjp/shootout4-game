@@ -326,7 +326,7 @@ test('11. 結果画面の「結果をシェア」: 国旗・スコア・サド�
   /* 共有できない環境ではクリップボードへ（コードの経路を確認） */
   const main = read('src/main.js');
   assert.match(main, /navigator\.share/);
-  assert.match(main, /navigator\.clipboard\.writeText\(text\)/);
+  assert.match(main, /\.clipboard\.writeText\(text\)/);
   assert.match(main, /toast\(t\('copied'\)\)/);
 });
 

@@ -10,7 +10,7 @@
  *
  * 1本ごとに、蹴る側は「狙い」、止める側は「飛ぶ方向」を1つ送る。
  * 両方そろった瞬間に、どちらの端末でも同じ判定（core/rules.js）で結果が出る。
- * 7秒＋猶予で片方が来ないときはホストが欠けた分を決めて配る（全員が同じ結果）。
+ * 8秒＋猶予で片方が来ないときはホストが欠けた分を決めて配る（全員が同じ結果）。
  *
  * 安全: 自由入力のチャットは無い（定型スタンプのみ・4秒あき）。受信は
  * validateOnlineKick / validateStamp で検証し、大きすぎる電文は捨てる。
@@ -93,7 +93,7 @@ const JOIN_WAIT_MS = 8000;
 const MATCH_JOIN_WAIT_MS = 15000;
 const WAIT_LINGER_MS = 2500;
 const REVEAL_GRACE_MS = 1400;
-export const ONLINE_TURN_MS = 7000;
+export const ONLINE_TURN_MS = 8000;
 export const MATCH_TIMEOUT_MS = 30000;
 /** キーパーの左右位置を相手へ送る間隔（80〜120ms。毎フレーム送らない） */
 export const KEEPER_SYNC_MS = 100;
@@ -135,6 +135,8 @@ export class ShootoutSession {
     this.remainingMs = 0;
     this.deadline = 0;
     this.opponentSeen = false;
+    /* 「相手が退出しました」を二重に出さない（Build 9） */
+    this.leftNotified = false;
     this.lastStampAt = 0;
     this.knownNames = new Map();
     this.started = false;
@@ -148,7 +150,13 @@ export class ShootoutSession {
     }
   }
 
-  openChannel(name, meta) {
+  /**
+   * チャンネルを購読する。
+   * onJoined … SUBSCRIBED（phx_reply ok）になった瞬間に呼ぶ。試合部屋では、ここで
+   *            hello を送る（Build 9: 購読完了前に送ると、1回の取りこぼしで
+   *            「相手が来ない」と誤判定して1〜2本目で強制退出していた）。
+   */
+  openChannel(name, meta, { onJoined = null } = {}) {
     this.trackMeta = this.trackMeta || new Map();
     this.trackMeta.set(name, meta);
     this.client.subscribe(name, {
@@ -156,10 +164,14 @@ export class ShootoutSession {
         if (status === 'joined') {
           const current = this.trackMeta.get(name);
           if (current) this.client.track(name, current);
+          if (onJoined) onJoined(name);
         }
-        if (status === 'error') this.emit({ type: 'error', reason: 'join' });
+        if (status === 'error') this.emit({ type: 'error', reason: name === this.matchName ? 'match-join' : 'join' });
       },
-      onPresence: ({ members }) => this.handlePresence(name, members),
+      onPresence: ({ members }) => {
+        if (this.matchName && name === this.matchName) this.handleMatchPresence(members);
+        else this.handlePresence(name, members);
+      },
       onBroadcast: (event, payload) => this.handleBroadcast(name, event, payload),
     });
   }
@@ -295,7 +307,11 @@ export class ShootoutSession {
     const waiting = this.channel;
     this.channel = name;
     this.trackMeta = new Map();
-    this.openChannel(name, this.meta({ mode: 'match' }));
+    this.openChannel(name, this.meta({ mode: 'match' }), {
+      onJoined: () => this.announceMatch(name),
+    });
+    /* すでに購読済み（再接続など）なら joined が来ないので、その場で名乗る */
+    if (typeof this.client.joined === 'function' && this.client.joined(name)) this.announceMatch(name);
     if (waiting && waiting !== name) {
       this.waitingChannel = waiting;
       this.waitLinger = this.schedule(() => this.releaseWaiting(), WAIT_LINGER_MS);
@@ -310,7 +326,7 @@ export class ShootoutSession {
     }
     this.started = true;
     this.opponentSeen = false;
-    this.client.broadcast(name, 'hello', { from: this.client.clientId, ...this.meta({ host: this.host }) });
+    this.leftNotified = false;
     this.emit({ type: 'paired', host: this.host, opponent: this.opponent, room: name });
     this.client.onStatus = null;
     if (this.matchWatchdog) this.clear(this.matchWatchdog);
@@ -319,6 +335,54 @@ export class ShootoutSession {
       if (!this.matchName || this.opponentSeen) return;
       this.emit({ type: 'opponent-left', reason: 'no-opponent' });
     }, this.matchWaitMs);
+  }
+
+  /**
+   * 試合部屋で名乗る（hello）＋まだ結果の出ていない自分の手を送り直す。
+   * SUBSCRIBED のたびに呼ばれるので、再接続・取りこぼしのあとも相手に届く。
+   */
+  announceMatch(name) {
+    if (!name || name !== this.matchName) return;
+    this.client.broadcast(name, 'hello', { from: this.client.clientId, ...this.meta({ host: this.host }) });
+    for (const [index, dir] of this.myPicks) {
+      if (this.resolved.has(index)) continue;
+      this.client.broadcast(name, 'pick', {
+        from: this.client.clientId,
+        round: index,
+        dir,
+        timeout: false,
+      });
+    }
+  }
+
+  /** 相手の存在を確認できた（hello・pick・keeper・stamp・reveal・presence） */
+  noteOpponentSeen() {
+    this.opponentSeen = true;
+    if (this.matchWatchdog) {
+      this.clear(this.matchWatchdog);
+      this.matchWatchdog = null;
+    }
+    this.releaseWaiting();
+  }
+
+  /**
+   * 試合部屋の在室者（Build 9）。
+   * hello を1回取りこぼしても、presence で相手が見えれば「居る」と分かる。
+   * 逆に、一度見た相手が本当に消えたときだけ「退出」を1回だけ出す。
+   */
+  handleMatchPresence(members) {
+    if (!this.matchName || !this.opponent) return;
+    const keys = (Array.isArray(members) ? members : [])
+      .filter((member) => member && member.key)
+      .map((member) => member.key);
+    if (keys.includes(this.opponent.key)) {
+      this.noteOpponentSeen();
+      return;
+    }
+    /* 自分が先に入った直後は、相手がまだ来ていないだけ。退出とは違う */
+    if (!this.opponentSeen || !this.started || this.leftNotified) return;
+    this.leftNotified = true;
+    this.emit({ type: 'opponent-left' });
   }
 
   releaseWaiting() {
@@ -346,12 +410,7 @@ export class ShootoutSession {
 
     if (event === 'hello') {
       if (payload.from === mine) return;
-      this.opponentSeen = true;
-      if (this.matchWatchdog) {
-        this.clear(this.matchWatchdog);
-        this.matchWatchdog = null;
-      }
-      this.releaseWaiting();
+      this.noteOpponentSeen();
       const nickname = String(payload.nickname || '').slice(0, 12);
       this.opponent = {
         key: payload.from,
@@ -366,6 +425,8 @@ export class ShootoutSession {
     if (event === 'pick') {
       const valid = validateOnlineKick(payload, { self: mine, seen: this.seen, maxRounds: MAX_TOTAL_KICKS });
       if (!valid.ok) return;
+      /* 手が届いた＝相手は居る（hello を取りこぼしていても強制退出しない） */
+      this.noteOpponentSeen();
       this.seen.add(`${valid.from}:${valid.round}`);
       this.oppPicks.set(valid.round, valid.dir);
       this.emit({ type: 'opponent-pick', round: valid.round });
@@ -383,6 +444,7 @@ export class ShootoutSession {
       if (!isPick(shooterPick)) return;
       if (keeperPick != null && !isPick(keeperPick)) return;
       if (this.resolved.has(round)) return;
+      this.noteOpponentSeen();
       this.forceResolve(round, payload.home, payload.away);
       return;
     }
@@ -396,6 +458,7 @@ export class ShootoutSession {
       });
       if (!valid.ok) return;
       this.lastStampAt = this.now();
+      this.noteOpponentSeen();
       this.emit({ type: 'stamp', id: valid.id, from: valid.from });
       return;
     }
@@ -405,12 +468,16 @@ export class ShootoutSession {
       if (!from || from === mine) return;
       const x = Number(payload.x);
       if (!Number.isFinite(x) || x < -1.2 || x > 1.2) return;
+      this.noteOpponentSeen();
       this.emit({ type: 'opponent-keeper', x: Math.max(-1, Math.min(1, x)) });
       return;
     }
 
     if (event === 'bye') {
       if (payload.from === mine) return;
+      /* 退出の合図はそのまま「退出」。presence の遅れで二重に出さない */
+      if (this.leftNotified) return;
+      this.leftNotified = true;
       this.emit({ type: 'opponent-left' });
     }
   }
@@ -585,6 +652,7 @@ export class ShootoutSession {
     this.deadline = 0;
     this.started = false;
     this.opponentSeen = false;
+    this.leftNotified = false;
     this.revealRound = -1;
     this.lastStampAt = 0;
     this.lastKeeperAt = 0;

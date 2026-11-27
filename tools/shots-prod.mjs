@@ -1,5 +1,5 @@
 /**
- * SHOOTOUT 4 — 実ブラウザ E2E（Chromium / Playwright） Build 8
+ * SHOOTOUT 4 — 実ブラウザ E2E（Chromium / Playwright） Build 9
  *
  *   node tools/shots-prod.mjs          … 全チェック＋スクリーンショット
  *   node tools/shots-prod.mjs smoke    … 起動確認だけ
@@ -7,13 +7,13 @@
  * 確かめること:
  *   A. 日本語起動・オープニング・ホーム・公式エンブレム（アイコン同一）
  *   B. 32か国（無料16 + PRO16・ロック表示）と3Dスタジアム
- *   C. 7秒＋決定・交代のワンクッション・時間切れ=枠外 MISS KICK
+ *   C. 8秒＋決定・交代のワンクッション・時間切れ=枠外 MISS KICK
  *   D. PK進行（5本＋サドンデス）・結果の ⚽ vs 🧤 表記
  *   E. PRO: 4部位・2種類のキャラクター（切替可）・32か国解放
- *   F. キーパー視点（引いた斜め後ろ）・左右ドラッグ・ターン表示
+ *   F. キーパー視点（ゴール真後ろ・高め）・左右ドラッグ・ターン表示
  *   G. 選手登録（名前・利き足・代表国）とキッカー表示
  *   H. ナイター・文字特大・12言語・幅320/360・下部の見切れ
- *   I. 通信ロビー・ランキング・音のテスト・コンソールエラー0
+ *   I. 通信ロビー・ランキング・音のテスト・結果カードPNG・コンソールエラー0
  *
  * 保存先: ../../downloads/shootout4-prod-*.png
  */
@@ -21,7 +21,7 @@
 import { mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from './serve.mjs';
@@ -603,7 +603,7 @@ async function main() {
       await page.evaluate(() => window.__SHOOTOUT__.skipOpening());
       await sleep(420);
       await buildSeven(page);
-      check('I1 コンソールエラー 0（Build 8 の通し）', errors.length === 0, errors.slice(0, 5));
+      check('I1 コンソールエラー 0（Build 9 の通し）', errors.length === 0, errors.slice(0, 5));
       await context.close();
     } finally {
       await browser.close();
@@ -630,8 +630,8 @@ async function main() {
     await probe.page.waitForTimeout(420);
     const probeTick2 = await probe.page.evaluate(() => window.__SHOOTOUT__.match?.remainingMs ?? 0);
     await probe.context.close();
-    check('C0 ラウンドは7秒から始まる（交代の後）', probeStart > 5500 && probeStart <= 7000, { probeStart });
-    check('C2 7秒のカウントダウンが動く', probeTick > 0 && probeTick2 < probeTick, { probeTick, probeTick2 });
+    check('C0 ラウンドは8秒から始まる（交代の後）', probeStart > 6500 && probeStart <= 8000, { probeStart });
+    check('C2 8秒のカウントダウンが動く', probeTick > 0 && probeTick2 < probeTick, { probeTick, probeTick2 });
 
     const { context, page } = await openPage(browser, { url: server.url });
     const opening = await page.evaluate(() => ({
@@ -819,11 +819,18 @@ async function main() {
       /交代/.test(swap.last?.title || '') && swap.last?.role === 'keep', swap);
     await page.evaluate(() => { window.__SHOOTOUT__.handover(); window.__SHOOTOUT__.hold(); });
     await page.waitForTimeout(150);
+    /* カメラは約0.5秒かけてキーパー視点へ寄る。止まってから見る */
+    await page.waitForFunction(() => {
+      const snapshot = window.__SHOOTOUT__.stadium();
+      return snapshot && snapshot.role === 'keep' && Math.abs(snapshot.camera[0]) < 0.1 && snapshot.camera[2] < -19.5;
+    }, null, { timeout: 5000 }).catch(() => {});
 
     /* キーパーの駆け引き（左右ドラッグ） */
     const keeperInfo = await state(page);
-    check('F1 キーパー視点はゴール全体が見える引いた斜め後ろ', keeperInfo.match.role === 'keep'
-      && keeperInfo.stadium.role === 'keep' && keeperInfo.stadium.keeperDistance > 8 && keeperInfo.stadium.camera[2] < -18, keeperInfo.stadium);
+    check('F1 キーパー視点はゴール真後ろ（x=0）・高めからゴール全体が見える', keeperInfo.match.role === 'keep'
+      && keeperInfo.stadium.role === 'keep' && keeperInfo.stadium.keeperDistance > 8
+      && keeperInfo.stadium.camera[2] < -18 && Math.abs(keeperInfo.stadium.camera[0]) < 0.1
+      && keeperInfo.stadium.camera[1] > 4, keeperInfo.stadium);
     const dirHint = await page.evaluate(() => {
       const hint = document.querySelector('[data-testid="keeper-dir-hint"]');
       const zone = document.querySelector('[data-testid="zone-TL"] span');
@@ -1198,7 +1205,7 @@ async function main() {
       && hiddenState.audio.music === false && hiddenState.audio.context !== 'running'
       && shownState.audio.backgrounded === false && shownState.audio.crowd === true,
       { beforeHide: beforeHide.audio, hidden: hiddenState.audio, shown: shownState.audio });
-    check('J2b バックグラウンド中はラウンドの時計も止まる（7秒を無駄に消費しない）',
+    check('J2b バックグラウンド中はラウンドの時計も止まる（8秒を無駄に消費しない）',
       pauseDelta < 400 && (shownState.remaining ?? 0) < (hiddenState.remaining ?? 0), { pauseDelta, hidden: hiddenState.remaining, shown: shownState.remaining });
 
     /* J3 試合画面の右上ボタン */
@@ -1671,6 +1678,93 @@ async function main() {
     check('K14 結果画面に「結果をシェア」（国旗・スコア・#SHOOTOUT4・IPKSF）',
       shareInfo.button.length > 0 && /🇯🇵/.test(shareInfo.text) && /🇧🇷/.test(shareInfo.text)
       && /\d+-\d+/.test(shareInfo.text) && /#SHOOTOUT4/.test(shareInfo.text) && /IPKSF/.test(shareInfo.text), shareInfo);
+
+    /* K14c 結果カード（720×900 の PNG）が本当に生成でき、画像として読める */
+    const card = await page.evaluate(async () => {
+      const value = await window.__SHOOTOUT__.cardPng();
+      if (!value || !value.dataUrl) return value;
+      const binary = atob(value.dataUrl.split(',')[1]);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+      const blob = new Blob([bytes], { type: 'image/png' });
+      let decoded = null;
+      try {
+        const bitmap = await createImageBitmap(blob);
+        decoded = { width: bitmap.width, height: bitmap.height };
+        bitmap.close?.();
+      } catch (error) {
+        decoded = { error: String(error && error.message) };
+      }
+      const head = [...bytes.slice(0, 8)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      return {
+        type: value.type,
+        size: value.size,
+        name: value.name,
+        width: value.width,
+        height: value.height,
+        png: head,
+        decoded,
+        head: value.dataUrl.slice(0, 32),
+        dataUrl: value.dataUrl,
+      };
+    });
+    if (card?.dataUrl) {
+      writeFileSync(resolve(OUT, 'shootout4-b9-result-card.png'), Buffer.from(card.dataUrl.split(',')[1], 'base64'));
+      delete card.dataUrl;
+    }
+    check('K14c 結果カードは 720×900 の本物の PNG（image/png・復号できる・描画エラー0）',
+      card?.type === 'image/png' && card?.size > 20000 && card?.width === 720 && card?.height === 900
+      && card?.png === '89504e470d0a1a0a' && card?.decoded?.width === 720 && card?.decoded?.height === 900
+      && /^data:image\/png;base64,iVBOR/.test(card?.head) && /\.png$/.test(card?.name ?? ''), card);
+
+    /* K14d 画像つき共有（navigator.share が files を受ける環境） */
+    await page.evaluate(() => {
+      window.__SHARE_CALLS__ = [];
+      const fake = async (data) => {
+        window.__SHARE_CALLS__.push({
+          files: data.files ? data.files.map((file) => ({ name: file.name, type: file.type, size: file.size })) : null,
+          title: data.title || '',
+          text: data.text || '',
+        });
+      };
+      try { Object.defineProperty(navigator, 'share', { value: fake, configurable: true }); } catch { /* そのまま */ }
+      try { Object.defineProperty(navigator, 'canShare', { value: () => true, configurable: true }); } catch { /* そのまま */ }
+    });
+    await page.click('[data-testid="share-result"]');
+    await page.waitForFunction(() => (window.__SHARE_CALLS__ || []).length >= 1, null, { timeout: 8000 }).catch(() => {});
+    await sleep(120);
+    const imageShare = await page.evaluate(() => window.__SHARE_CALLS__);
+    check('K14d 共有できる環境では PNG（files）＋文面を一度に渡す',
+      imageShare.length === 1 && imageShare[0].files?.length === 1
+      && imageShare[0].files[0].type === 'image/png' && imageShare[0].files[0].size > 20000
+      && /\.png$/.test(imageShare[0].files[0].name)
+      && imageShare[0].text === shareInfo.text && /SHOOTOUT 4/.test(imageShare[0].title), imageShare);
+
+    /* K14e 画像つき共有が失敗しても、文面だけの共有へ落ちて止まらない */
+    await page.evaluate(() => {
+      window.__SHARE_CALLS__ = [];
+      const fake = async (data) => {
+        window.__SHARE_CALLS__.push({
+          files: data.files ? data.files.map((file) => ({ type: file.type })) : null,
+          text: data.text || '',
+        });
+        if (data.files) {
+          const error = new Error('files not supported');
+          error.name = 'NotAllowedError';
+          throw error;
+        }
+      };
+      try { Object.defineProperty(navigator, 'share', { value: fake, configurable: true }); } catch { /* そのまま */ }
+    });
+    await page.click('[data-testid="share-result"]');
+    await page.waitForFunction(() => (window.__SHARE_CALLS__ || []).length >= 2, null, { timeout: 8000 }).catch(() => {});
+    await sleep(120);
+    const textFallback = await page.evaluate(() => window.__SHARE_CALLS__);
+    check('K14e 画像共有が失敗したら文面だけの共有へフォールバックする',
+      textFallback.length === 2 && textFallback[0].files?.length === 1 && textFallback[1].files === null
+      && textFallback[1].text === shareInfo.text, textFallback);
+
+    /* K14b 共有もクリップボードも無い環境（Web Share 非対応）＝コピーで必ず終わる */
     await page.evaluate(() => {
       try { Object.defineProperty(navigator, 'share', { value: undefined, configurable: true }); } catch { /* そのまま */ }
       try {
@@ -1680,7 +1774,8 @@ async function main() {
       window.__COPIED__ = '';
     });
     await page.click('[data-testid="share-result"]');
-    await sleep(320);
+    await page.waitForFunction(() => Boolean(window.__COPIED__), null, { timeout: 8000 }).catch(() => {});
+    await sleep(150);
     const shared = await page.evaluate(() => ({ copied: window.__COPIED__, toast: document.querySelector('#toast')?.textContent ?? '' }));
     check('K14b 共有できない環境ではクリップボードへコピーして「コピーしました」',
       /#SHOOTOUT4/.test(shared.copied) && shared.copied === shareInfo.text && /コピーしました/.test(shared.toast), shared);

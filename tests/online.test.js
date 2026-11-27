@@ -266,7 +266,7 @@ test('フレンド対戦: 合言葉の部屋で2人が組める', async () => {
   sb.leave({ bye: false });
 });
 
-test('7秒で来ない手はホストが決めて配る（両者の結果が一致する）', async () => {
+test('8秒で来ない手はホストが決めて配る（両者の結果が一致する）', async () => {
   const broker = new Broker();
   const a = makeClient(broker, 'aaa');
   const b = makeClient(broker, 'bbb');
@@ -413,4 +413,177 @@ test('時間切れの枠外（OUT）も通信で通り、両者の結果が一�
   assert.equal(event.miss, true);
   assert.equal(event.save, null);
   assert.equal(event.shooter, 'home');
+});
+
+/* ------------------------------------------------------------------ *\
+ * Build 9: 早すぎる強制退出（no-opponent）の修正
+ *   hello を1回取りこぼしても、SUBSCRIBED・presence・pick 受信のどれかで
+ *   「相手は居る」と分かり、matchWaitMs を過ぎても退出させない。
+ * ------------------------------------------------------------------ */
+
+/** 購読・在室・受信を手動で動かせるクライアント（時間を待たずに確かめる） */
+function manualClient(id) {
+  const handlers = new Map();
+  const sent = [];
+  return {
+    clientId: id,
+    sent,
+    handlers,
+    subscribe(name, value) { handlers.set(name, value); return name; },
+    unsubscribe(name) { handlers.delete(name); },
+    track: () => true,
+    joined: () => false,
+    broadcast: (name, event, payload) => { sent.push({ name, event, payload }); return true; },
+    fireStatus(name, status) { handlers.get(name)?.onStatus?.(status); },
+    firePresence(name, members) { handlers.get(name)?.onPresence?.({ members }); },
+    fireBroadcast(name, event, payload) { handlers.get(name)?.onBroadcast?.(event, payload); },
+    helloCount: () => sent.filter((item) => item.event === 'hello').length,
+  };
+}
+
+function manualSession({ client, events = [], matchWaitMs = 60, extra = {} }) {
+  return new ShootoutSession({
+    client,
+    onEvent: (event) => events.push(event),
+    schedule,
+    clear,
+    matchWaitMs,
+    ...extra,
+  });
+}
+
+function pairThroughWaiting(session, client, { partner = 'other', self = 'me' } = {}) {
+  session.mode = 'quick';
+  session.channel = 'shootout-quick:JP:domestic';
+  session.openChannel(session.channel, session.meta({ mode: 'quick' }));
+  session.handlePresence(session.channel, [{ key: self }, { key: partner }]);
+  return session.matchName;
+}
+
+test('Build 9: hello は購読完了（SUBSCRIBED）後に送り、結果の出ていない自分の手も送り直す', () => {
+  const client = manualClient('me');
+  const session = manualSession({ client });
+  const name = pairThroughWaiting(session, client);
+  assert.equal(name, 'shootout-match:me-other');
+  assert.equal(client.helloCount(), 0, '購読完了前に hello を送らない（取りこぼしの原因）');
+
+  session.myPicks.set(0, 'TL'); /* 送ったが相手に届いていない手 */
+  client.fireStatus(name, 'joined');
+  assert.equal(client.helloCount(), 1, 'SUBSCRIBED で名乗る');
+  const picks = client.sent.filter((item) => item.event === 'pick');
+  assert.equal(picks.length, 1);
+  assert.equal(picks[0].payload.round, 0);
+  assert.equal(picks[0].payload.dir, 'TL');
+
+  session.resolved.add(0);
+  client.fireStatus(name, 'joined');
+  assert.equal(client.sent.filter((item) => item.event === 'pick').length, 1, '決着済みの手は送らない');
+});
+
+test('Build 9: hello を1回取りこぼしても、相手の在室（presence）で強制退出しない', async () => {
+  const client = manualClient('me');
+  const events = [];
+  const session = manualSession({ client, events, matchWaitMs: 60 });
+  const name = pairThroughWaiting(session, client);
+  session.started = true;
+  /* 名乗ったが、相手はまだ部屋に居ない＝取りこぼし（何も届かない） */
+  client.fireStatus(name, 'joined');
+  assert.equal(session.opponentSeen, false);
+
+  /* 相手が部屋に入ってきた（presence） */
+  client.firePresence(name, [{ key: 'me' }, { key: 'other' }]);
+  assert.equal(session.opponentSeen, true, 'presence で相手を確認');
+
+  await flush(120); /* matchWaitMs(60) を過ぎても */
+  assert.equal(events.filter((event) => event.type === 'opponent-left').length, 0, '強制退出しない');
+});
+
+test('Build 9: hello も presence も来なくても、相手の pick で「居る」と分かる', async () => {
+  const client = manualClient('me');
+  const events = [];
+  const session = manualSession({ client, events, matchWaitMs: 60 });
+  const name = pairThroughWaiting(session, client);
+  session.started = true;
+  client.fireStatus(name, 'joined');
+
+  client.fireBroadcast(name, 'pick', { from: 'other', round: 0, dir: 'BR' });
+  assert.equal(session.opponentSeen, true, 'pick を受けたら相手は居る');
+
+  await flush(120);
+  assert.equal(events.filter((event) => event.type === 'opponent-left').length, 0);
+});
+
+test('Build 9: 本当に相手が来ないときだけ、matchWaitMs で1回だけ退出する', async () => {
+  const client = manualClient('me');
+  const events = [];
+  const session = manualSession({ client, events, matchWaitMs: 60 });
+  const name = pairThroughWaiting(session, client);
+  session.started = true;
+  client.fireStatus(name, 'joined');
+  /* 取りこぼしのまま、presence も pick も来ない */
+  await flush(140);
+  const left = events.filter((event) => event.type === 'opponent-left');
+  assert.equal(left.length, 1, '来ないときは退出させる（安全弁は残す）');
+  assert.equal(left[0].reason, 'no-opponent');
+});
+
+test('Build 9: 一度見た相手が消えたら退出を1回だけ出し、bye と重ねて二重に出さない', async () => {
+  const client = manualClient('me');
+  const events = [];
+  const session = manualSession({ client, events, matchWaitMs: 60 });
+  const name = pairThroughWaiting(session, client);
+  session.started = true;
+  client.fireStatus(name, 'joined');
+  client.firePresence(name, [{ key: 'me' }, { key: 'other' }]);
+  assert.equal(session.opponentSeen, true);
+
+  /* 相手が部屋から消えた（presence の leaves だけが届く） */
+  client.firePresence(name, [{ key: 'me' }]);
+  client.firePresence(name, [{ key: 'me' }]);
+  assert.equal(events.filter((event) => event.type === 'opponent-left').length, 1, '1回だけ');
+
+  /* そのあと bye が届いても二重にしない */
+  client.fireBroadcast(name, 'bye', { from: 'other' });
+  assert.equal(events.filter((event) => event.type === 'opponent-left').length, 1);
+});
+
+test('Build 9: 本物のブローカーで最初の hello を落としても、1〜2本目で退出させられない', async () => {
+  const broker = new Broker();
+  /* 最初の hello だけ捨てる（実際に起きた「取りこぼし」を再現） */
+  const originalReceive = broker.receive.bind(broker);
+  let droppedHello = 0;
+  broker.receive = (socket, message) => {
+    const isHello = message?.event === 'broadcast' && message.payload?.event === 'hello';
+    if (isHello && droppedHello < 1) {
+      droppedHello += 1;
+      return;
+    }
+    originalReceive(socket, message);
+  };
+
+  const a = makeClient(broker, 'aaa');
+  const b = makeClient(broker, 'bbb');
+  const eventsA = [];
+  const eventsB = [];
+  const sa = makeSession(a, eventsA, { matchWaitMs: 160 });
+  const sb = makeSession(b, eventsB, { matchWaitMs: 160 });
+  sa.quickMatch({ scope: 'domestic', country: 'JP', profile: { nickname: 'A' } });
+  sb.quickMatch({ scope: 'domestic', country: 'JP', profile: { nickname: 'B' } });
+  await flush(60);
+  assert.ok(sa.matchName, 'A が組めた');
+  assert.equal(sa.matchName, sb.matchName);
+  assert.equal(droppedHello, 1, 'hello を1回落とした');
+
+  /* 1本目と2本目をプレイ中でも、退出させられない */
+  sa.pick(0, 'TL');
+  sb.pick(0, 'BR');
+  await flush(30);
+  sa.pick(1, 'TL');
+  sb.pick(1, 'TL');
+  await flush(200); /* matchWaitMs(160) を過ぎる */
+  assert.equal(eventsA.filter((event) => event.type === 'opponent-left').length, 0, 'A は退出しない');
+  assert.equal(eventsB.filter((event) => event.type === 'opponent-left').length, 0, 'B も退出しない');
+  assert.equal(eventsA.filter((event) => event.type === 'kick').length, 2, '1〜2本目が成立している');
+  sa.leave({ bye: false });
+  sb.leave({ bye: false });
 });

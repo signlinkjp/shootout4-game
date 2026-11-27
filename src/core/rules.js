@@ -15,7 +15,7 @@
  */
 
 export const DIRECTIONS = Object.freeze(['TL', 'TR', 'BL', 'BR']);
-/** 時間切れ: ゴールを狙わず枠外へ蹴る（7秒以内に決めなかったとき） */
+/** 時間切れ: ゴールを狙わず枠外へ蹴る（8秒以内に決めなかったとき） */
 export const MISS = 'OUT';
 export const PICKABLE = Object.freeze([...DIRECTIONS, MISS]);
 export const SIDES = Object.freeze(['me', 'opp']);
@@ -51,7 +51,7 @@ export function isPick(value) {
 }
 
 /**
- * 時間切れ（7秒）のときに、実際に使う手を決める（Build 7）。
+ * 時間切れ（8秒）のときに、実際に使う手を決める（Build 7）。
  *
  *  - 方向（TL/TR/BL/BR）を選んでいたら、決定ボタンを押し忘れていても
  *    「その方向へ普通に蹴る／飛ぶ」。時間切れの扱い（枠外・棒立ち）にはしない。

@@ -26,24 +26,24 @@ function pngHeader(path) {
   };
 }
 
-test('Build 8 / v1.0.0 に全ファイルのビルド番号が揃っている', () => {
+test('Build 9 / v1.0.0 に全ファイルのビルド番号が揃っている', () => {
   assert.equal(CONFIG.version, '1.0.0');
-  assert.equal(CONFIG.build, 8);
+  assert.equal(CONFIG.build, 9);
 
   const pbx = read('ios/App/App.xcodeproj/project.pbxproj');
   const builds = [...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((match) => match[1]);
-  assert.deepEqual(builds, ['8', '8']);
+  assert.deepEqual(builds, ['9', '9']);
   assert.equal((pbx.match(/MARKETING_VERSION = 1\.0\.0;/g) || []).length, 2);
 
   const pkg = JSON.parse(read('package.json'));
   assert.equal(pkg.version, '1.0.0');
-  assert.match(pkg.description, /Build 8/);
+  assert.match(pkg.description, /Build 9/);
 
-  assert.match(read('src/config.js'), /build: 8/);
+  assert.match(read('src/config.js'), /build: 9/);
   assert.match(read('src/ui/home.js'), /V\$\{CONFIG\.version\} · BUILD \$\{CONFIG\.build\}/);
   assert.match(read('src/ui/misc.js'), /BUILD \$\{CONFIG\.build\}/);
-  assert.match(read('README.md'), /Build 7/);
-  assert.match(read('docs/testflight-setup.md'), /\*\*8\*\*/);
+  assert.match(read('README.md'), /Build 9/);
+  assert.match(read('docs/testflight-setup.md'), /\*\*9\*\*/);
 });
 
 test('アイコンは IPKSF 公式エンブレムで、iOS と assets が同一（旧アイコンが残っていない）', () => {
@@ -72,11 +72,11 @@ test('アイコンは IPKSF 公式エンブレムで、iOS と assets が同一�
   }
 });
 
-test('配布用 www/ が作れて、ビルド8のアイコンとコードが同期している', async () => {
+test('配布用 www/ が作れて、ビルド9のアイコンとコードが同期している', async () => {
   await makeWww();
   const wwwIcon = pngHeader('www/assets/icon-1024.png');
   assert.equal(wwwIcon.hash, pngHeader('assets/icon-1024.png').hash);
-  assert.match(read('www/src/config.js'), /build: 8/);
+  assert.match(read('www/src/config.js'), /build: 9/);
   assert.match(read('www/src/three/characters.js'), /buildCharacter/);
   assert.match(read('www/src/core/registration.js'), /IPKSF/);
   assert.match(read('www/src/core/ranking.js'), /pointsFor/);
@@ -101,7 +101,7 @@ test('32か国ぶんの国旗（96x64）が同梱されている', () => {
 test('演出の間合い: 交代は1.2〜1.5秒、キーパー同期は80〜120ms', () => {
   assert.ok(CONFIG.handoverMs >= 1200 && CONFIG.handoverMs <= 1500, `${CONFIG.handoverMs}ms`);
   assert.ok(KEEPER_SYNC_MS >= 80 && KEEPER_SYNC_MS <= 120, `${KEEPER_SYNC_MS}ms`);
-  assert.equal(CONFIG.roundSeconds, 7);
+  assert.equal(CONFIG.roundSeconds, 8);
 });
 
 test('キャラクターは2種類（無料ブロック / PRO スタイリッシュ）', () => {
@@ -111,13 +111,13 @@ test('キャラクターは2種類（無料ブロック / PRO スタイリッシ
   assert.equal(CHARACTERS.find((item) => item.id === 'stylized').pro, true);
 });
 
-test('キーパー視点は「引いた斜め後ろ」で、キッカー視点と別のカメラ', () => {
+test('キーパー視点は「ゴール真後ろ・高め」で、キッカー視点と別のカメラ', () => {
   const stadium = read('src/three/stadium.js');
   const keep = stadium.match(/keep: \{ pos: new THREE\.Vector3\(([-\d.]+), ([-\d.]+), ([-\d.]+)\), look: new THREE\.Vector3\(([-\d.]+), ([-\d.]+), ([-\d.]+)\), fov: (\d+)/);
   assert.ok(keep, 'keep カメラ定義');
   const [, x, y, z, , , , fov] = keep.map(Number);
   assert.ok(z < -18, `ゴール裏へ引く: z=${z}`);
-  assert.ok(x > 3, `斜め: x=${x}`);
+  assert.ok(Math.abs(x) < 0.01, `真後ろ: x=${x}`);
   assert.ok(y > 3.3, `高い: y=${y}`);
   assert.ok(fov >= 56, `画角: ${fov}`);
   assert.match(stadium, /setKeeperOffset/);

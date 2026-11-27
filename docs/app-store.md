@@ -5,12 +5,12 @@
 - English: `SHOOTOUT 4 - Penalty Duel`
 
 ## サブタイトル（30文字以内）
-- 日本語: `7秒で決める、4択のPK心理戦`
+- 日本語: `8秒で決める、4択のPK心理戦`
 - English: `Four corners. Seven seconds.`
 
 ## プロモーションテキスト（170文字以内）
 - 日本語:
-  `世界32か国（無料16 + PRO16）から自分の国を選び、4つのコースと7秒の制限時間で読み合うPK対決。ゴールネットが揺れる3Dスタジアム、国別の歓声、5人＋サドンデスのPKスコアボード。能力差ゼロ、純粋な心理戦です。`
+  `世界32か国（無料16 + PRO16）から自分の国を選び、4つのコースと8秒の制限時間で読み合うPK対決。ゴールネットが揺れる3Dスタジアム、国別の歓声、5人＋サドンデスのPKスコアボード。能力差ゼロ、純粋な心理戦です。`
 - English:
   `Pick one of 16 nations and win the shootout with four corners and seven seconds of nerve. A 3D stadium with swaying nets, national crowds, five kickers and sudden death. No stat gaps — pure mind games.`
 
@@ -21,7 +21,7 @@
 
 ■ ルールはシンプル、読み合いは深い
 ゴールは4つのコース（左上・右上・左下・右下）に分かれています。
-あなたは「狙う方向」か「飛ぶ方向」を選び、7秒以内に決定ボタンで確定。
+あなたは「狙う方向」か「飛ぶ方向」を選び、8秒以内に決定ボタンで確定。
 相手も同時に選んでいて、両方が決まった瞬間に結果が出ます。
 同じ方向ならセーブ、違えばゴール。5本ずつ蹴って同点なら、6本目からサドンデス。
 残りの本数で追いつけなくなった時点で試合は終わります。
@@ -84,7 +84,7 @@ PK,サッカー,点PK,シュート,キーパー,心理戦,スポーツ,対戦,�
 ## スクリーンショット（6.7インチ 1290×2796）
 1. `shootout4-prod-home.png` — ホーム（エンブレムと世界観）
 2. `shootout4-prod-country.png` — 国えらび（32か国・PROロック・CPUの強さ）
-3. `shootout4-prod-match-day.png` — デイの試合（3Dスタジアム・4択・7秒）
+3. `shootout4-prod-match-day.png` — デイの試合（3Dスタジアム・4択・8秒）
 4. `shootout4-prod-aim.png` — 方向を選んだ瞬間
 5. `shootout4-prod-goal.png` — ゴール演出（ネット・紙吹雪・GK）
 6. `shootout4-prod-result.png` — 結果とPKボード

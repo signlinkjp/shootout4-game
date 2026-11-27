@@ -137,7 +137,7 @@ try {
 const config = read('src/config.js');
 check('設定: config.js の bundleId が一致', /bundleId: 'jp\.signlink\.Shootout4'/.test(config));
 check('設定: PRO 商品IDが一致', /pro: 'jp\.signlink\.Shootout4\.pro'/.test(config));
-check('設定: ラウンドは7秒', /roundSeconds: 7/.test(config));
+check('設定: ラウンドは8秒', /roundSeconds: 8/.test(config));
 check('設定: 開発地域は ja（index.html）', /<html lang="ja"/.test(read('index.html')));
 
 const failed = checks.filter((item) => !item.ok);

@@ -236,8 +236,8 @@ test('4c. キーパーの選択は「画面で押した位置」と一致する�
  * 5. ビルド番号
  * ------------------------------------------------------------------ */
 
-test('5. Build 8 / v1.0.0 で揃っている', () => {
+test('5. Build 9 / v1.0.0 で揃っている', () => {
   assert.equal(CONFIG.version, '1.0.0');
-  assert.equal(CONFIG.build, 8);
-  assert.equal((read('ios/App/App.xcodeproj/project.pbxproj').match(/CURRENT_PROJECT_VERSION = 8;/g) || []).length, 2);
+  assert.equal(CONFIG.build, 9);
+  assert.equal((read('ios/App/App.xcodeproj/project.pbxproj').match(/CURRENT_PROJECT_VERSION = 9;/g) || []).length, 2);
 });
