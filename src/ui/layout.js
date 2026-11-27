@@ -41,6 +41,7 @@ const ICONS = {
   soundwave: '<path d="M4 10v4h3l4 3.5v-11L7 10z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15 8.6a5 5 0 0 1 0 6.8M17.8 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
   soundOff: '<path d="M4 9.5h3.5L12 5.5v13L7.5 14.5H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M15.5 9.5l4.5 5M20 9.5l-4.5 5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
   share: '<circle cx="18" cy="5.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="6" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="18.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.2 10.8l7.6-4M8.2 13.2l7.6 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+  chat: '<path d="M4 5.5h16v10.2h-8.4L7.2 19v-3.3H4z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><circle cx="9" cy="10.6" r="1.15" fill="currentColor" stroke="none"/><circle cx="12.5" cy="10.6" r="1.15" fill="currentColor" stroke="none"/><circle cx="16" cy="10.6" r="1.15" fill="currentColor" stroke="none"/>',
 };
 
 export function icon(name, className = '') {

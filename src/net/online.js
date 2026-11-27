@@ -18,6 +18,7 @@
 
 import { CONFIG } from '../config.js';
 import { DIRECTIONS, MISS, isPick, payloadTooLarge, validateOnlineKick, validateStamp, MAX_TOTAL_KICKS } from '../core/rules.js';
+import { EMOTE_WIRE_IDS } from '../core/emotes.js';
 import {
   fromWire, toWire, normalizeRow, rankTable,
 } from '../core/ranking.js';
@@ -375,18 +376,21 @@ export class ShootoutSession {
     if (event === 'reveal') {
       const round = Number(payload.round);
       if (!Number.isInteger(round) || round < 0 || round >= MAX_TOTAL_KICKS) return;
-      const home = DIRECTIONS.includes(payload.home) ? payload.home : null;
-      const away = DIRECTIONS.includes(payload.away) ? payload.away : null;
-      if (!home || !away) return;
+      const shooterSide = this.shooterOf(round);
+      const shooterPick = shooterSide === 'home' ? payload.home : payload.away;
+      const keeperPick = shooterSide === 'home' ? payload.away : payload.home;
+      /* 蹴る側は4方向か枠外（MISS）。キーパーは4方向か「動けず」（MISS を合図に使う） */
+      if (!isPick(shooterPick)) return;
+      if (keeperPick != null && !isPick(keeperPick)) return;
       if (this.resolved.has(round)) return;
-      this.forceResolve(round, home, away);
+      this.forceResolve(round, payload.home, payload.away);
       return;
     }
 
     if (event === 'stamp') {
       const valid = validateStamp(payload, {
         self: mine,
-        allowed: ['hello', 'nice', 'oops', 'gg', 'thanks', 'wow'],
+        allowed: EMOTE_WIRE_IDS,
         lastAt: this.lastStampAt,
         now: this.now(),
       });
@@ -459,12 +463,15 @@ export class ShootoutSession {
       this.revealTimer = null;
       if (this.resolved.has(round)) return;
       if (!this.myPicks.has(round) || !this.oppPicks.has(round)) {
-        const seed = String(this.client.clientId).length + String(this.opponent?.key || '').length;
-        const shooterSide = this.shooterOf(round);
         const mineSide = this.mySide;
-        /* 蹴る側が時間切れなら枠外。止める側が間に合わなければ、蹴った方向はそのまま届いている */
-        const mine = this.myPicks.get(round) || (shooterSide === mineSide ? MISS : fallbackDirection(round, seed));
-        const theirs = this.oppPicks.get(round) || (shooterSide !== mineSide ? MISS : fallbackDirection(round, seed + 1));
+        /*
+         * 時間切れの埋め合わせ（Build 7）:
+         *  蹴る側が来なければ枠外（MISS）。キーパーが来なければ動けない（MISS を合図）。
+         *  「選んだけど決定を押し忘れた」ときは、その選んだ手がすでに届いているので
+         *  ここでは触らない（4方向はそのまま使う）。
+         */
+        const mine = this.myPicks.get(round) ?? MISS;
+        const theirs = this.oppPicks.get(round) ?? MISS;
         const home = mineSide === 'home' ? mine : theirs;
         const away = mineSide === 'home' ? theirs : mine;
         this.client.broadcast(this.matchName, 'reveal', { round, home, away });
@@ -502,27 +509,37 @@ export class ShootoutSession {
     this.resolved.add(index);
     const shooter = this.shooterOf(index);
     const shot = shooter === 'home' ? home : away;
-    const save = shooter === 'home' ? away : home;
+    const keeperPick = shooter === 'home' ? away : home;
     const miss = shot === MISS;
-    const goal = !miss && shot !== save;
+    /*
+     * キーパーが枠外（MISS）を送ってきた＝時間切れで動けなかった（Build 7）。
+     * シュートが枠外なら、そもそも失点にはならないので「動けず」にはしない。
+     */
+    const stuck = !miss && keeperPick === MISS;
+    const save = miss || stuck ? null : keeperPick;
+    const goal = !miss && (stuck ? true : shot !== save);
     const event = {
       type: 'kick',
       round: index,
       shooter, /* 'home' | 'away' */
       shooterSide: shooter === this.mySide ? 'me' : 'opp',
       shot,
-      save: miss ? null : save,
+      save,
       miss,
+      stuck,
       goal,
     };
     this.emit(event);
     return event;
   }
 
+  /**
+   * 時間切れの手（Build 7）。蹴る側なら枠外、キーパーなら「動けない」（どちらも MISS を送る）。
+   * 方向を選んでいたときは、このメソッドではなく pick() でその方向を送ること。
+   */
   timeoutPick(round) {
     if (this.myPicks.has(Number(round))) return false;
-    const seed = Number(round) + 3;
-    return this.pick(round, fallbackDirection(round, seed), { timeout: true });
+    return this.pick(round, MISS, { timeout: true });
   }
 
   sendStamp(id) {

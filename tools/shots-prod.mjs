@@ -224,6 +224,304 @@ async function layoutCheck(page, label) {
 
 const sha = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
+/** Build 7 の確認（キーパーの左右・スタンプ／定型文・時間切れ）。`node tools/shots-prod.mjs build7` でも単体で走る。 */
+async function buildSeven(page) {
+
+    /* ============================================================== *\
+     * M. Build 7（キーパーの左右の向き・スタンプ／定型文・時間切れの扱い）
+     * ============================================================== */
+    await page.evaluate(() => {
+      window.__SHOOTOUT__.setPrefs({ language: 'ja', size: 'standard', night: false });
+      window.__SHOOTOUT_FORCE_CPU__ = ['TL'];
+      window.__SHOOTOUT__.startMatch();
+      window.__SHOOTOUT__.handover();
+      window.__SHOOTOUT__.hold();
+    });
+    await sleep(900);
+
+    /* M1 スタンプボタンの場所（PK表の右・上部・押しやすい） */
+    const emoteSlot = await page.evaluate(() => {
+      const button = document.querySelector('[data-testid="emote-toggle"]');
+      const board = document.querySelector('.pkboard');
+      const row = document.querySelector('[data-testid="pk-row-me"]');
+      const hud = document.querySelector('.hud');
+      const stage = document.querySelector('#stage');
+      if (!button || !board || !row) return { found: false };
+      const b = button.getBoundingClientRect();
+      const r = row.getBoundingClientRect();
+      const s = board.getBoundingClientRect();
+      const h = hud?.getBoundingClientRect();
+      const st = stage?.getBoundingClientRect();
+      return {
+        found: true,
+        width: Math.round(b.width),
+        height: Math.round(b.height),
+        rightOfCells: b.left >= r.right - 1,
+        insideBoard: b.right <= s.right + 1 && b.top >= s.top - 1 && b.bottom <= s.bottom + 1,
+        belowHud: !h || b.top >= h.bottom - 2,
+        aboveStage: !st || b.bottom <= st.top + 2,
+        inViewport: b.right <= window.innerWidth + 1 && b.left >= -1,
+        noOverlapWithCells: !(b.left < r.right - 1 && b.top < r.bottom - 1 && b.bottom > r.top + 1),
+      };
+    });
+    check('M1 プレイ中画面のPK表の右（上部）にスタンプボタン（40px・表と重ならない）',
+      emoteSlot.found && emoteSlot.width >= 36 && emoteSlot.height >= 36 && emoteSlot.rightOfCells
+      && emoteSlot.insideBoard && emoteSlot.belowHud && emoteSlot.aboveStage && emoteSlot.inViewport
+      && emoteSlot.noOverlapWithCells, emoteSlot);
+    await shot(page, 'b7-emote-button');
+
+    /* M2 トレイ（スタンプ8・駆け引き4・リアクション4） */
+    await page.click('[data-testid="emote-toggle"]');
+    await sleep(220);
+    const trayInfo = await page.evaluate(() => {
+      const tray = document.querySelector('[data-testid="emote-tray"]');
+      const button = document.querySelector('[data-testid="emote-toggle"]');
+      if (!tray) return { open: false };
+      const box = tray.getBoundingClientRect();
+      return {
+        open: !tray.hidden,
+        expanded: button?.getAttribute('aria-expanded') === 'true',
+        pills: tray.querySelectorAll('.emotepill').length,
+        stamps: tray.querySelectorAll('[data-kind="stamp"] .emotepill').length,
+        taunts: tray.querySelectorAll('[data-kind="taunt"] .emotepill').length,
+        reacts: tray.querySelectorAll('[data-kind="react"] .emotepill').length,
+        ids: [...tray.querySelectorAll('.emotepill')].map((pill) => pill.dataset.emote),
+        inside: box.left >= -1 && box.right <= window.innerWidth + 1 && box.top >= -1 && box.bottom <= window.innerHeight + 1,
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        texts: [...tray.querySelectorAll('.emotepill__text')].map((element) => element.textContent.trim()),
+      };
+    });
+    check('M2 トレイが開き、スタンプ8・駆け引き4・リアクション4（12言語の文言・画面内）',
+      trayInfo.open && trayInfo.expanded && trayInfo.pills === 16 && trayInfo.stamps === 8
+      && trayInfo.taunts === 4 && trayInfo.reacts === 4 && trayInfo.inside && trayInfo.overflow <= 0
+      && trayInfo.texts.every((text) => text.length > 0 && !text.startsWith('emote_')), trayInfo);
+    check('M2b 駆け引きとリアクションの定型文（トモアキさん指定の文言）',
+      ['左に蹴るよ？', '右に蹴るかも…', '真ん中はないよ', '読めてるよ！', 'ナイスゴール👍', 'やられた⚽️💦', 'ナイスセーブ🧤', 'ドンマイ！']
+        .every((text) => trayInfo.texts.includes(text)), trayInfo.texts);
+    await shot(page, 'b7-emote-tray');
+
+    /* M3 押すと吹き出しが出て、トレイが閉じる */
+    await page.click('[data-testid="emote-taunt_left"]');
+    await sleep(260);
+    const ownBubble = await page.evaluate(() => {
+      const bubble = document.querySelector('[data-testid="emote-bubble"]');
+      const box = bubble?.getBoundingClientRect();
+      const stage = document.querySelector('#stage')?.getBoundingClientRect();
+      return {
+        visible: Boolean(bubble && !bubble.hidden && bubble.getClientRects().length),
+        text: bubble?.querySelector('.emotebubble__text')?.textContent?.trim() ?? '',
+        face: bubble?.querySelector('.emotebubble__face')?.textContent?.trim() ?? '',
+        who: bubble?.querySelector('.emotebubble__who')?.textContent?.trim() ?? '',
+        mine: bubble?.dataset.mine ?? '',
+        trayClosed: document.querySelector('[data-testid="emote-tray"]')?.hidden === true,
+        insideStage: Boolean(box && stage && box.left >= stage.left - 1 && box.right <= stage.right + 1
+          && box.top >= stage.top - 1 && box.bottom <= stage.bottom + 1),
+        upperArea: Boolean(box && stage && box.top < stage.top + stage.height * 0.45),
+        opacity: Number(getComputedStyle(bubble).opacity),
+        last: window.__SHOOTOUT__.lastEmote,
+      };
+    });
+    check('M3 スタンプを押すと自分の吹き出しが試合画面の上部に出る（トレイは閉じる・相手の邪魔をしない位置）',
+      ownBubble.visible && ownBubble.text === '左に蹴るよ？' && ownBubble.face === '👈' && ownBubble.mine === 'true'
+      && ownBubble.trayClosed && ownBubble.insideStage && ownBubble.upperArea && ownBubble.opacity > 0.3
+      && ownBubble.last?.id === 'taunt_left', ownBubble);
+    /* スクショ用に吹き出しを出したまま撮る（自動で消えるのは次の M3b で確認） */
+    await page.evaluate(() => window.__SHOOTOUT__.emote('taunt_left', true));
+    await shot(page, 'b7-emote-bubble');
+    /* M3b 数秒で消える */
+    const bubbleGone = await (async () => {
+      await page.evaluate(() => window.__SHOOTOUT__.emote('nice'));
+      await sleep(3200);
+      return page.evaluate(() => {
+        const bubble = document.querySelector('[data-testid="emote-bubble"]');
+        return { hidden: bubble?.hidden === true, visible: Boolean(bubble?.getClientRects().length) };
+      });
+    })();
+    check('M3b 吹き出しは数秒（2.6秒）で消える', bubbleGone.hidden && !bubbleGone.visible, bubbleGone);
+
+    /* M4 新しいものが来たら差し替わる（受信も同じ吹き出し） */
+    const replaced = await page.evaluate(() => {
+      const before = window.__SHOOTOUT__.lastEmote?.text ?? '';
+      const shown = window.__SHOOTOUT__.emote('nice_save');
+      const bubble = document.querySelector('[data-testid="emote-bubble"]');
+      return {
+        before,
+        shown,
+        text: bubble?.querySelector('.emotebubble__text')?.textContent?.trim() ?? '',
+        face: bubble?.querySelector('.emotebubble__face')?.textContent?.trim() ?? '',
+        visible: Boolean(bubble && !bubble.hidden),
+      };
+    });
+    check('M4 次のスタンプで差し替わる（新しいものが優先）',
+      replaced.visible && replaced.text === 'ナイスセーブ🧤' && replaced.face === '🧤'
+      && replaced.before !== replaced.text, replaced);
+
+    /* M5 CPU からのリアクション（CPU 戦でも押せて、返ってくる） */
+    const cpuEmotes = await page.evaluate(() => ({
+      conceded: window.__SHOOTOUT__.cpuEmote('conceded'),
+      cpuGoal: window.__SHOOTOUT__.cpuEmote('cpuGoal'),
+      ids: window.__SHOOTOUT__.emoteIds(),
+      sections: window.__SHOOTOUT__.emoteSections(),
+      shown: (() => {
+        window.__SHOOTOUT__.emote('no_problem');
+        const bubble = document.querySelector('[data-testid="emote-bubble"]');
+        return {
+          text: bubble?.textContent ?? '',
+          who: bubble?.querySelector('.emotebubble__who')?.textContent?.trim() ?? '',
+        };
+      })(),
+    }));
+    check('M5 CPU 戦でも押せて、CPU からもリアクションが返る（16種・3区分）',
+      cpuEmotes.ids.length === 16 && cpuEmotes.sections.length === 3
+      && cpuEmotes.ids.includes(cpuEmotes.conceded) && cpuEmotes.ids.includes(cpuEmotes.cpuGoal)
+      && /ドンマイ！/.test(cpuEmotes.shown.text) && cpuEmotes.shown.who.length > 0, cpuEmotes);
+
+    /* M6 文字特大でもトレイが崩れない（長い言語・文字特大を実際に描く） */
+    const emoteLanguageProblems = [];
+    for (const [language, size] of [['ja', 'extra'], ['th', 'standard']]) {
+      await page.evaluate(({ tag, scale }) => {
+        window.__SHOOTOUT__.setPrefs({ language: tag, size: scale });
+      }, { tag: language, scale: size });
+      await sleep(140);
+      await page.evaluate(() => { window.__SHOOTOUT__.handover(); window.__SHOOTOUT__.hold(); });
+      await page.click('[data-testid="emote-toggle"]');
+      await sleep(180);
+      const info = await page.evaluate(() => {
+        const tray = document.querySelector('[data-testid="emote-tray"]');
+        const box = tray?.getBoundingClientRect();
+        const texts = [...(tray?.querySelectorAll('.emotepill__text') ?? [])].map((element) => element.textContent.trim());
+        return {
+          pills: texts.length,
+          empty: texts.filter((text) => !text || /^emote_|^stamp_/.test(text)).length,
+          clipped: [...(tray?.querySelectorAll('.emotepill') ?? [])].filter((pill) => {
+            const rect = pill.getBoundingClientRect();
+            return rect.width > 0 && (rect.right > window.innerWidth + 1 || rect.left < -1);
+          }).length,
+          insideX: Boolean(box && box.left >= -1 && box.right <= window.innerWidth + 1),
+          overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          size: document.documentElement.dataset.size,
+          sample: texts[0] ?? '',
+        };
+      });
+      if (info.pills !== 16 || info.empty || info.clipped || !info.insideX || info.overflow > 0) {
+        emoteLanguageProblems.push({ language, ...info });
+      }
+      await page.click('[data-testid="emote-toggle"]');
+      await sleep(90);
+    }
+    /* 12言語すべてに文言がある（キー名が出ない。画面は描き直さずに辞書だけ引く） */
+    const emoteLanguageTexts = await page.evaluate(() => {
+      const languages = window.__SHOOTOUT__.languages;
+      const table = {};
+      for (const language of languages) {
+        table[language] = window.__SHOOTOUT__.emoteTexts(language).map((item) => item.text);
+      }
+      return table;
+    });
+    const emoteTextProblems = Object.entries(emoteLanguageTexts)
+      .filter(([, texts]) => texts.length !== 16 || texts.some((text) => !text || /^emote_|^stamp_/.test(text)));
+    check('M6 12言語すべてにスタンプ・定型文の文言があり、文字特大でもトレイが崩れない',
+      emoteLanguageProblems.length === 0 && emoteTextProblems.length === 0,
+      { layout: emoteLanguageProblems, texts: emoteTextProblems.map(([language]) => language) });
+    await page.evaluate(() => window.__SHOOTOUT__.setPrefs({ language: 'ja', size: 'standard' }));
+    await sleep(160);
+
+    /* M7 キーパーの左右: 指を右へ → キーパーも画面の右へ */
+    await page.evaluate(() => { window.__SHOOTOUT__.handover(); window.__SHOOTOUT__.hold(); });
+    let keeperReady = await page.evaluate(() => window.__SHOOTOUT__.match);
+    for (let guard = 0; guard < 4 && keeperReady && keeperReady.role !== 'keep' && !keeperReady.winner; guard += 1) {
+      await playKick(page, 'TL');
+      await page.evaluate(() => {
+        window.__SHOOTOUT__.handover();
+        window.__SHOOTOUT__.next();
+        window.__SHOOTOUT__.handover();
+        window.__SHOOTOUT__.hold();
+      });
+      await sleep(420);
+      keeperReady = await page.evaluate(() => window.__SHOOTOUT__.match);
+    }
+    const dragKeeper = async (fraction) => {
+      const box = await page.locator('[data-testid="keeper-zone"]').boundingBox();
+      if (!box) return null;
+      await page.evaluate(() => window.__SHOOTOUT__.keeperOffset(0));
+      await sleep(60);
+      const base = await page.evaluate(() => window.__SHOOTOUT__.stadium());
+      await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.6);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width * fraction, box.y + box.height * 0.6, { steps: 5 });
+      await page.mouse.up();
+      await sleep(140);
+      const after = await page.evaluate(() => window.__SHOOTOUT__.stadium());
+      return {
+        baseScreenX: base.keeperScreenX,
+        screenX: after.keeperScreenX,
+        worldX: after.keeper[0],
+        offset: after.keeperOffset,
+        keeperX: (await page.evaluate(() => window.__SHOOTOUT__.match))?.keeperX,
+        role: after.role,
+      };
+    };
+    const dragRight = await dragKeeper(0.9);
+    const dragLeft = await dragKeeper(0.1);
+    check('M7 キーパーを右へドラッグすると画面の右へ、左へドラッグすると画面の左へ動く',
+      Boolean(dragRight && dragLeft) && keeperReady?.role === 'keep'
+      && dragRight.worldX < -0.2 && dragRight.screenX > dragRight.baseScreenX + 0.02
+      && dragLeft.worldX > 0.2 && dragLeft.screenX < dragLeft.baseScreenX - 0.02
+      && dragRight.offset < 0 && dragLeft.offset > 0, { dragRight, dragLeft, role: keeperReady?.role });
+    await shot(page, 'b7-keeper-drag');
+
+    /* M8 時間切れ: 方向を選んでいれば、決定を押し忘れてもその方向で普通に飛ぶ */
+    const timeoutKeeper = await page.evaluate(() => {
+      window.__SHOOTOUT__.hold();
+      if (window.__SHOOTOUT__.match?.role !== 'keep') return { skipped: 'not-keeper' };
+      window.__SHOOTOUT__.selectDirection('BL'); /* キーパー視点の左下 → ゴール基準では BR */
+      window.__SHOOTOUT__.timeoutNow();
+      return window.__SHOOTOUT__.match?.lastEvent ?? null;
+    });
+    await sleep(700);
+    check('M8 時間切れ（キーパーが方向を選んでいた）は棒立ちにせず、その方向へ飛ぶ',
+      timeoutKeeper.skipped === 'not-keeper'
+      || (timeoutKeeper.stuck === false && timeoutKeeper.timeout === false
+        && timeoutKeeper.save === 'BR' && timeoutKeeper.shot === 'TL'), timeoutKeeper);
+
+    /* M8b 蹴る番でも、方向を選んでいれば時間切れで枠外にしない */
+    const timeoutShooter = await page.evaluate(() => {
+      if (window.__SHOOTOUT__.match?.winner) return { skipped: 'finished' };
+      window.__SHOOTOUT__.handover();
+      window.__SHOOTOUT__.next();
+      window.__SHOOTOUT__.handover();
+      window.__SHOOTOUT__.hold();
+      if (window.__SHOOTOUT__.match?.role !== 'shoot') return { skipped: 'not-shooter' };
+      window.__SHOOTOUT__.selectDirection('TR');
+      window.__SHOOTOUT__.timeoutNow();
+      return window.__SHOOTOUT__.match?.lastEvent ?? null;
+    });
+    await sleep(700);
+    check('M8b 時間切れ（キッカーが方向を選んでいた）は枠外にせず、その方向へ蹴る',
+      timeoutShooter.skipped === 'finished' || timeoutShooter.skipped === 'not-shooter'
+      || (timeoutShooter.miss === false && timeoutShooter.timeout === false && timeoutShooter.shot === 'TR'), timeoutShooter);
+
+    /* M9 時間切れ（何も選んでいない）: キーパーは動けない／キッカーは枠外 */
+    const timeoutStuck = await page.evaluate(() => {
+      if (window.__SHOOTOUT__.match?.winner) return { skipped: 'finished' };
+      window.__SHOOTOUT__.handover();
+      window.__SHOOTOUT__.next();
+      window.__SHOOTOUT__.handover();
+      window.__SHOOTOUT__.hold();
+      const role = window.__SHOOTOUT__.match?.role;
+      window.__SHOOTOUT__.timeoutNow();
+      return { role, event: window.__SHOOTOUT__.match?.lastEvent ?? null };
+    });
+    await sleep(600);
+    check('M9 何も選ばずに時間切れ: キーパーは動けず（stuck）／キッカーは枠外（MISS）',
+      timeoutStuck.skipped === 'finished'
+      || (timeoutStuck.role === 'keep' && timeoutStuck.event?.stuck === true && timeoutStuck.event?.timeout === true)
+      || (timeoutStuck.role === 'shoot' && timeoutStuck.event?.miss === true && timeoutStuck.event?.timeout === true),
+      timeoutStuck);
+    await page.evaluate(() => window.__SHOOTOUT__.go('home'));
+    await sleep(250);
+}
+
 async function main() {
   const mode = process.argv[2] || 'full';
   const chromium = loadChromium();
@@ -240,6 +538,28 @@ async function main() {
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none', '--enable-unsafe-swiftshader'],
     env: { ...process.env, LD_LIBRARY_PATH: `${LIBS}:${process.env.LD_LIBRARY_PATH ?? ''}` },
   });
+
+  /* Build 7 の確認だけを走らせる（時間制限のある環境で full を分割するとき用） */
+  if (mode === 'build7') {
+    try {
+      const { context, page } = await openPage(browser, { url: server.url });
+      await page.evaluate(() => window.__SHOOTOUT__.skipOpening());
+      await sleep(420);
+      await buildSeven(page);
+      check('I1 コンソールエラー 0（Build 7 の通し）', errors.length === 0, errors.slice(0, 5));
+      await context.close();
+    } finally {
+      await browser.close();
+      await server.close();
+    }
+    const failedBuild7 = checks.filter((item) => !item.ok);
+    process.stdout.write(`\n${checks.length - failedBuild7.length}/${checks.length} checks passed\n`);
+    if (failedBuild7.length) {
+      process.stdout.write(`failed: ${failedBuild7.map((item) => item.name).join(' / ')}\n`);
+      process.exitCode = 1;
+    }
+    return;
+  }
 
   try {
     /* ============================================================== *\
@@ -1368,6 +1688,9 @@ async function main() {
     }
     check('L2 遊び方にキーパーの方向の説明と例（12言語・ボタン文言と一致・はみ出しなし）', keeperRuleProblems.length === 0, keeperRuleProblems);
     await page.evaluate(() => { window.__SHOOTOUT__.setPrefs({ language: 'ja' }); window.__SHOOTOUT__.go('home'); });
+
+    /* M. Build 7（時間制限で分割したいときは SHOOTOUT_E2E_SKIP_M=1 で個別に `build7` を走らせる） */
+    if (process.env.SHOOTOUT_E2E_SKIP_M !== '1') await buildSeven(page);
 
     /* ============================================================== *\
      * I. コンソールエラー 0

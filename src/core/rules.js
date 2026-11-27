@@ -50,6 +50,24 @@ export function isPick(value) {
   return PICKABLE.includes(value);
 }
 
+/**
+ * 時間切れ（7秒）のときに、実際に使う手を決める（Build 7）。
+ *
+ *  - 方向（TL/TR/BL/BR）を選んでいたら、決定ボタンを押し忘れていても
+ *    「その方向へ普通に蹴る／飛ぶ」。時間切れの扱い（枠外・棒立ち）にはしない。
+ *  - 何も選んでいなければ、蹴る側は枠外（MISS）、キーパーは動けない（stuck）。
+ *
+ * 返り値:
+ *   dir   … 使う手（キーパーの stuck は MISS を「飛ばない」の合図として通信に使い、
+ *           画面では save を null にして「動けず」と出す）
+ *   auto  … 時間切れとして扱うか（選んでいたときは false）
+ *   stuck … キーパーが動けなかったか（= 相手のシュートは必ず入る）
+ */
+export function timeoutChoice({ role = 'shoot', selection = null } = {}) {
+  if (isDirection(selection)) return { dir: selection, auto: false, stuck: false };
+  return { dir: MISS, auto: true, stuck: role !== 'shoot' };
+}
+
 export function otherSide(side) {
   return side === 'me' ? 'opp' : 'me';
 }

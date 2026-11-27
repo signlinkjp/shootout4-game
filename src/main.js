@@ -9,7 +9,10 @@ import { CONFIG } from './config.js';
 import { tr, detectLanguage, LANGUAGES, LANGUAGE_NAMES, isLanguage } from './i18n.js';
 import {
   DIRECTIONS, MISS, newMatch, resolveKick, kickerNumber, phase, randomDirection, winRate, mirrorDirection,
+  timeoutChoice, isDirection,
 } from './core/rules.js';
+import { keeperOffsetFromRatio, ratioFromClientX } from './core/controls.js';
+import { EMOTE_IDS, EMOTE_SECTIONS, EMOTES, emoteById, cpuEmoteFor } from './core/emotes.js';
 import { chooseCPU } from './core/cpu.js';
 import {
   COUNTRIES, getCountry, pickOpponent, countryName, isCountryUnlocked, hairSpecForCountry,
@@ -389,6 +392,7 @@ function beginRound() {
   }
   const banner = $('#banner');
   if (banner) { banner.hidden = true; banner.className = 'banner'; }
+  toggleEmoteTray(false);
   const nextBtn = $('#next-kick');
   if (nextBtn) nextBtn.hidden = true;
   $$('.zone').forEach((button) => {
@@ -578,9 +582,14 @@ function autoPick() {
 function setKeeperFromClientX(clientX) {
   const stage = $('#stage');
   if (!stage || !stadium || !match || match.role !== 'keep' || match.confirmed) return;
-  const rect = stage.getBoundingClientRect();
-  const ratio = ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
-  const value = Math.max(-1, Math.min(1, ratio));
+  const ratio = ratioFromClientX(clientX, stage.getBoundingClientRect());
+  /*
+   * Build 7: キーパー視点はゴール裏からキッカーを見ているので、画面の右はワールド -X。
+   * 指を右へ動かしたらキーパーも画面の右へ動くよう、ここで符号を反転する。
+   * 送る値（match.keeperX）はワールド座標のオフセットのままなので、
+   * キッカー側の画面では同じゴールポスト側に相手キーパーが見える。
+   */
+  const value = keeperOffsetFromRatio(ratio);
   match.keeperX = value;
   stadium.setKeeperOffset(value);
   if (match.online && session) session.sendKeeper(value);
@@ -623,6 +632,16 @@ function resolveRound(dir, { timeout }) {
   updateTimer(0, CONFIG.roundSeconds * 1000);
 
   const role = match.role || currentRole();
+  const picked = isDirection(dir) ? dir : null;
+  /*
+   * Build 7: 時間切れの扱い。
+   *   ・方向を選んでいたなら、決定を押し忘れていても「その方向へ普通に蹴る／飛ぶ」
+   *   ・何も選んでいなかったときだけ、蹴る側は枠外（MISS）・キーパーは動けない（stuck）
+   */
+  const choice = timeout && !picked
+    ? timeoutChoice({ role, selection: null })
+    : { dir: picked, auto: false, stuck: false };
+
   if (match.online) {
     if (!session || !session.matchName) {
       toast(t('connectionError'));
@@ -631,12 +650,16 @@ function resolveRound(dir, { timeout }) {
     setKickStatus(t('waitingOpponent'));
     match.waitingOpponent = true;
     const round = match.state.history.length;
-    /* 時間切れ: 蹴る番なら枠外（OUT）。キーパーなら相手の手に任せる */
-    const pick = dir || (role === 'shoot' ? MISS : randomDirection());
-    /* キーパーの画面はキッカーと向かい合う（左右が反転する）ので、押したボタンの位置へ
-       飛べるよう、送る前に反転してゴール基準の方向にそろえる */
-    const wire = role === 'keep' && dir ? mirrorDirection(dir) : pick;
-    const sent = session.pick(round, wire, { timeout });
+    /*
+     * キーパーの画面はキッカーと向かい合う（左右が反転する）ので、押したボタンの位置へ
+     * 飛べるよう、送る前に反転してゴール基準の方向にそろえる。
+     * 時間切れで動けなかったキーパーは、MISS を「飛ばない」の合図として送る
+     * （相手側では必ず失点になる）。
+     */
+    const wire = choice.stuck
+      ? MISS
+      : (picked ? (role === 'keep' ? mirrorDirection(picked) : picked) : MISS);
+    const sent = session.pick(round, wire, { timeout: choice.auto });
     if (!sent) {
       /* すでに相手の手が届いていて、この端末では解決済みの可能性 */
       setKickStatus('');
@@ -645,14 +668,13 @@ function resolveRound(dir, { timeout }) {
   }
 
   if (role === 'shoot') {
-    /* 時間切れは枠外へ蹴る（自動でコースを選ばない） */
-    const shot = dir || (timeout ? MISS : randomDirection());
-    applyKick(shot, match.cpuDir, { timeout });
+    /* 時間切れで何も選んでいなければ枠外へ蹴る（自動でコースを選ばない） */
+    const shot = picked || (choice.auto ? MISS : randomDirection());
+    applyKick(shot, match.cpuDir, { timeout: choice.auto });
   } else {
-    /* キーパーが時間切れ: 動けず、相手のシュートは入る */
-    /* キーパーはキッカーと向かい合うので、画面で押した左右をゴール基準へ反転してから渡す */
-    const save = dir ? mirrorDirection(dir) : null;
-    applyKick(match.cpuDir, save, { timeout, stuck: timeout && !dir });
+    /* キーパー: 選んでいればその方向へ飛ぶ。何も選んでいなければ動けない */
+    const save = picked ? mirrorDirection(picked) : null;
+    applyKick(match.cpuDir, save, { timeout: choice.auto, stuck: choice.stuck });
   }
 }
 
@@ -697,6 +719,8 @@ function applyKick(shot, save, { timeout = false, stuck = false } = {}) {
       setKickStatus(t(event.miss ? 'timeoutMiss' : event.stuck ? 'timeoutStuck' : 'timeoutMiss'));
     }
     showBanner(bannerKind);
+    /* Build 7: CPU 戦なら、ときどき CPU からも軽いリアクションが返る */
+    if (!match.online) maybeCpuEmote(event);
   };
 
   if (timeout) setKickStatus(t(event.miss ? 'timeoutMiss' : event.stuck ? 'timeoutStuck' : 'timeoutMiss'));
@@ -933,7 +957,7 @@ function handleOnlineEvent(event) {
       }
       break;
     case 'stamp':
-      showStamp(event.id);
+      showEmote(event.id, { mine: false });
       break;
     case 'opponent-left':
       toast(t('opponentLeft'));
@@ -1310,16 +1334,81 @@ function toast(text) {
   toastTimer = setTimeout(() => element.classList.remove('is-show'), 2000);
 }
 
-function showStamp(id) {
-  const faces = { hello: '👋', nice: '🔥', oops: '😅', gg: '🤝', thanks: '🙏', wow: '😮' };
-  const pop = $('#stamp-pop');
-  if (!pop) return;
-  pop.hidden = false;
-  pop.textContent = faces[id] || '👏';
-  pop.style.animation = 'none';
-  void pop.offsetWidth;
-  pop.style.animation = '';
-  setTimeout(() => { pop.hidden = true; }, 1400);
+/**
+ * スタンプ・定型文の吹き出し（Build 7）。
+ * 送るのは id だけなので、表示は受け取った側の言語で行う。
+ * 新しいものが来たら差し替え、2.6秒で消す（上部の小さな吹き出しなので画面を塞がない）。
+ */
+let emoteTimer = null;
+/** hold（検証用）を指定すると自動では消さない（スクリーンショット用） */
+function showEmote(id, { mine = false, hold = 0 } = {}) {
+  const emote = emoteById(id);
+  if (!emote) return null;
+  const bubble = $('#emote-bubble');
+  if (!bubble) return null;
+  const text = t(emote.key);
+  const face = $('#emote-bubble-face');
+  const label = $('#emote-bubble-text');
+  const who = $('#emote-bubble-who');
+  if (face) face.textContent = emote.face;
+  if (label) label.textContent = text;
+  if (who) who.textContent = t(mine ? 'you' : 'opponent');
+  bubble.dataset.mine = mine ? 'true' : 'false';
+  bubble.dataset.emote = emote.id;
+  bubble.hidden = false;
+  bubble.classList.remove('is-show');
+  void bubble.offsetWidth;
+  bubble.classList.add('is-show');
+  clearTimeout(emoteTimer);
+  emoteTimer = hold ? null : setTimeout(() => {
+    bubble.hidden = true;
+    bubble.classList.remove('is-show');
+  }, 2600);
+  if (match) match.lastEmote = { id: emote.id, text, mine };
+  return { id: emote.id, face: emote.face, text, mine };
+}
+
+/** スタンプ・定型文のトレイを開く／閉じる */
+function toggleEmoteTray(force) {
+  const tray = $('#emote-tray');
+  const button = $('#emote-btn');
+  if (!tray) return false;
+  const open = force === undefined ? tray.hidden : Boolean(force);
+  tray.hidden = !open;
+  button?.setAttribute('aria-expanded', String(open));
+  return open;
+}
+
+/** トレイの1つを押したとき: 自分の吹き出しを出し、通信戦なら相手へ送る */
+function sendEmote(id) {
+  const emote = emoteById(id);
+  if (!emote) return null;
+  selectSound();
+  const shown = showEmote(id, { mine: true });
+  if (match && match.online && session && session.matchName) session.sendStamp(id);
+  toggleEmoteTray(false);
+  return shown;
+}
+
+/**
+ * CPU 戦のときだけ、たまに CPU からも軽いリアクションを返す（試し押ししやすくする）。
+ * event は今の1本の結果、role は自分の役割。
+ */
+function maybeCpuEmote(event) {
+  if (!match || match.online || !event) return null;
+  const kind = event.miss
+    ? 'iMiss'
+    : event.side === 'me'
+      ? (event.goal ? 'conceded' : 'cpuSave')
+      : (event.goal ? 'cpuGoal' : 'iSaved');
+  const id = cpuEmoteFor(kind);
+  if (!id) return null;
+  const roundId = match.roundId;
+  setTimeout(() => {
+    if (!match || screen !== 'match' || match.roundId !== roundId) return;
+    showEmote(id, { mine: false });
+  }, 900);
+  return id;
 }
 
 function askConfirm(message, onYes) {
@@ -1467,11 +1556,16 @@ app.addEventListener('click', async (event) => {
     selectDirection(zone.dataset.dir);
     return;
   }
-  const stamp = event.target.closest('button[data-stamp]');
+  const stamp = event.target.closest('button[data-emote]');
   if (stamp) {
     unlockAudio();
-    if (session && session.matchName) session.sendStamp(stamp.dataset.stamp);
-    showStamp(stamp.dataset.stamp);
+    sendEmote(stamp.dataset.emote);
+    return;
+  }
+  if (event.target.closest('[data-action="emote-toggle"]')) {
+    unlockAudio();
+    toggleEmoteTray();
+    uiSwitch();
     return;
   }
   const footButton = event.target.closest('button[data-foot]');
@@ -1794,6 +1888,14 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+/* Build 7: スタンプ・定型文のトレイは、外を触ったら閉じる */
+document.addEventListener('pointerdown', (event) => {
+  const tray = $('#emote-tray');
+  if (!tray || tray.hidden) return;
+  if (event.target.closest('#emote-tray') || event.target.closest('[data-action="emote-toggle"]')) return;
+  toggleEmoteTray(false);
+}, { capture: true });
+
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) onAppHidden();
   else onAppVisible();
@@ -1857,6 +1959,22 @@ window.__SHOOTOUT__ = {
     if (match) match.keeperX = Number(x) || 0;
     return stadium.snapshot().keeperOffset;
   },
+  /* Build 7: キーパーの左右（指の位置 → ワールドのオフセット）とスタンプ・定型文 */
+  keeperRatio: (ratio) => keeperOffsetFromRatio(ratio),
+  emote: (id, hold = false) => showEmote(id, { mine: true, hold: hold ? 600000 : 0 }),
+  emoteIds: () => [...EMOTE_IDS],
+  emoteSections: () => EMOTE_SECTIONS.map((section) => ({ ...section })),
+  emoteText: (id) => {
+    const emote = emoteById(id);
+    return emote ? { id: emote.id, face: emote.face, text: t(emote.key) } : null;
+  },
+  emoteTray: (open) => toggleEmoteTray(open),
+  emoteTexts: (language) => EMOTE_IDS.map((id) => {
+    const emote = emoteById(id);
+    return { id, face: emote.face, text: tr(isLanguage(language) ? language : prefs.language, emote.key) };
+  }),
+  cpuEmote: (kind) => cpuEmoteFor(kind, { chance: 1 }),
+  get lastEmote() { return (match && match.lastEmote) || null; },
   remoteKeeperOffset: (x) => {
     if (!stadium) return 0;
     return stadium.setRemoteKeeperOffset(x);
@@ -1903,6 +2021,7 @@ window.__SHOOTOUT__ = {
       lastEvent: match.state.history.length ? { ...match.state.history.at(-1) } : null,
       keeperX: match.keeperX || 0,
       opponentKeeperX: match.opponentKeeperX || 0,
+      lastEmote: match.lastEmote || null,
     };
   },
   get audio() { return audioState(); },

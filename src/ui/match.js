@@ -2,13 +2,9 @@
 
 import { CONFIG } from '../config.js';
 import { DIRECTIONS, pkBoard, kickerNumber, phase, mirrorDirection } from '../core/rules.js';
+import { EMOTES, EMOTE_SECTIONS } from '../core/emotes.js';
 import { getCountry, countryName } from '../core/countries.js';
 import { flag, flagEmoji, icon, esc } from './layout.js';
-
-const STAMPS = ['hello', 'nice', 'oops', 'gg', 'thanks', 'wow'];
-const STAMP_FACE = {
-  hello: '👋', nice: '🔥', oops: '😅', gg: '🤝', thanks: '🙏', wow: '😮',
-};
 
 export function pkCellList(state, side, t) {
   const board = pkBoard(state);
@@ -38,7 +34,7 @@ export function pkRows(state, t, { meCode = 'JP', oppCode = 'BR', className = ''
   return order.map((side) => {
     const mine = side === 'me';
     const phaseLabel = side === state.first ? t('firstKick') : t('secondKick');
-    return `<div class="pkboard__row pkboard__row--${side} ${className}" data-testid="pk-row-${side}" data-order="${phaseLabel}">
+    return `<div class="pkboard__row pkboard__row--${side} ${className}" data-testid="pk-row-${side}" data-order="${esc(phaseLabel)}">
       <span class="pkboard__tag"><b>${esc(mine ? t('you') : t('opponent'))}</b><em>${esc(phaseLabel)}</em></span>
       ${flag(mine ? meCode : oppCode, 'flag flag--xs')}
       ${pkCells(state, side, t)}
@@ -61,6 +57,30 @@ function turnText(t, role) {
 
 function footLabel(t, foot) {
   return foot === 'left' ? t('footLeft') : t('footRight');
+}
+
+/** スタンプ・定型文のトレイ（Build 7） */
+function emoteTray(t) {
+  const group = ({ kind, label }) => {
+    const items = EMOTES.filter((emote) => emote.kind === kind);
+    if (!items.length) return '';
+    return `<div class="emotetray__group" data-kind="${kind}">
+      <span class="emotetray__label">${esc(t(label))}</span>
+      <div class="emotetray__grid emotetray__grid--${kind}">
+        ${items.map((emote) => `<button type="button" class="emotepill" data-emote="${emote.id}" data-testid="emote-${emote.id}" aria-label="${esc(t(emote.key))}">
+          <span class="emotepill__face" aria-hidden="true">${emote.face}</span>
+          <span class="emotepill__text">${esc(t(emote.key))}</span>
+        </button>`).join('')}
+      </div>
+    </div>`;
+  };
+  return `<div class="emotetray" id="emote-tray" data-testid="emote-tray" hidden>
+    <div class="emotetray__head">
+      <b>${esc(t('emoteTray'))}</b>
+      <button type="button" class="emotetray__close" data-action="emote-toggle" aria-label="${esc(t('close'))}">${icon('close')}</button>
+    </div>
+    ${EMOTE_SECTIONS.map(group).join('')}
+  </div>`;
 }
 
 export function matchView({ t, prefs, state, language, online = false, roomLabel = '', kickerFor = null }) {
@@ -92,7 +112,13 @@ export function matchView({ t, prefs, state, language, online = false, roomLabel
     </header>
 
     <section class="pkboard" aria-label="PK scoreboard">
-      ${pkRows(state, t, { meCode: me.code, oppCode: oppCode })}
+      <div class="pkboard__rows">
+        ${pkRows(state, t, { meCode: me.code, oppCode: oppCode })}
+      </div>
+      <button type="button" class="emotebtn" id="emote-btn" data-action="emote-toggle" data-testid="emote-toggle"
+        aria-expanded="false" aria-controls="emote-tray" aria-label="${esc(t('emoteTray'))}" title="${esc(t('emoteTray'))}">
+        ${icon('chat')}</button>
+      ${emoteTray(t)}
     </section>
 
     <div class="stage" id="stage">
@@ -133,6 +159,11 @@ export function matchView({ t, prefs, state, language, online = false, roomLabel
         <span class="keeper-zone__hint">${esc(t('keeperHint'))}</span>
       </div>
       <div class="banner" id="banner" hidden></div>
+      <div class="emotebubble" id="emote-bubble" data-testid="emote-bubble" hidden>
+        <span class="emotebubble__face" id="emote-bubble-face" aria-hidden="true"></span>
+        <span class="emotebubble__text" id="emote-bubble-text"></span>
+        <span class="emotebubble__who" id="emote-bubble-who"></span>
+      </div>
       <div class="stage__status" id="kick-status" role="status" aria-live="polite"></div>
       <button class="nextbtn" id="next-kick" data-action="next" hidden>${esc(t('nextKick') || t('confirm'))} ›</button>
     </div>
@@ -153,12 +184,10 @@ export function matchView({ t, prefs, state, language, online = false, roomLabel
       </button>
     </section>
 
-    ${online ? `<section class="stampbar" aria-label="${esc(t('stampsTitle'))}">
-      ${STAMPS.map((id) => `<button class="stamp" data-stamp="${id}" aria-label="${esc(t(`stamp_${id}`))}">${STAMP_FACE[id]}<small>${esc(t(`stamp_${id}`))}</small></button>`).join('')}
+    ${online ? `<section class="stampbar">
       <button class="stamp stamp--leave" data-action="online-leave">${icon('door')}<small>${esc(t('leaveMatch'))}</small></button>
     </section>` : ''}
 
-    <div class="stamp-pop" id="stamp-pop" hidden></div>
     ${roomLabel ? `<div class="roomchip">${esc(t('roomCode'))}: <b>${esc(roomLabel)}</b></div>` : ''}
   </div>`;
 }

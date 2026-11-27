@@ -1394,6 +1394,11 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
     state,
     snapshot() {
       const keeperDistance = Number(camera.position.distanceTo(keeper.position).toFixed(2));
+      /* Build 7: キーパーが「いまのカメラの画面」のどこに見えているか（NDC x, -1=左端 +1=右端） */
+      const keeperScreenX = (() => {
+        const point = keeper.position.clone().project(camera);
+        return Number.isFinite(point.x) ? Number(point.x.toFixed(3)) : null;
+      })();
       return {
         available: true,
         night: state.night,
@@ -1428,6 +1433,7 @@ export function createStadium(canvas, { night = false, quality = 'high' } = {}) 
         camera: camera.position.toArray().map((v) => Number(v.toFixed(2))),
         cameraFov: Number(camera.fov.toFixed(1)),
         keeper: keeper.position.toArray().map((v) => Number(v.toFixed(2))),
+        keeperScreenX,
         keeperRoll: Number(keeper.rotation.z.toFixed(3)),
         keeperDive: dive ? { side: dive.side, high: dive.high, done: Boolean(dive.done) } : null,
         keeperOffset: state.keeperOffset,

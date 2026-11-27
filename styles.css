@@ -307,7 +307,9 @@ h1, h2, h3, p { margin: 0; }
 .hud__phase { font-size: 0.56em; color: var(--gold); letter-spacing: 0.06em; white-space: nowrap; }
 .hud__dash { font-size: 0.9em; color: var(--dim-2); line-height: 0.8; }
 
-.pkboard { flex: 0 0 auto; display: flex; flex-direction: column; gap: 3px; padding: 0 4px; }
+.pkboard { flex: 0 0 auto; display: flex; flex-direction: row; align-items: center; gap: 6px; padding: 0 4px; position: relative; z-index: 6; }
+.pkboard__rows { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
+.pkboard--result { flex-direction: column; align-items: stretch; }
 .pkboard__row { display: flex; align-items: center; gap: 6px; }
 .pkboard__tag { width: 3.4em; flex: 0 0 auto; font-size: 0.6em; color: var(--dim-2); }
 .pkrow { display: flex; gap: 3px; flex-wrap: nowrap; }
@@ -333,7 +335,7 @@ h1, h2, h3, p { margin: 0; }
 }
 .stage canvas { display: block; width: 100%; height: 100%; }
 .stage::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 44px rgba(3, 10, 22, 0.55), inset 0 -30px 40px rgba(3, 10, 22, 0.35); border-radius: inherit; }
-.stage__fallback[hidden], .banner[hidden], .nextbtn[hidden], .stamp-pop[hidden] { display: none !important; }
+.stage__fallback[hidden], .banner[hidden], .nextbtn[hidden], .emotebubble[hidden], .emotetray[hidden] { display: none !important; }
 .stage__overlay { position: absolute; inset: 8px 8px auto; display: flex; justify-content: space-between; gap: 6px; pointer-events: none; }
 .chip {
   font-size: 0.62em; font-weight: 800; padding: 4px 8px; border-radius: 999px;
@@ -390,14 +392,61 @@ h1, h2, h3, p { margin: 0; }
 
 .toast { position: absolute; left: 50%; bottom: calc(14px + var(--safe-b)); transform: translateX(-50%); font-size: 0.76em; background: rgba(6, 16, 30, 0.9); border: 1px solid var(--line); padding: 8px 14px; border-radius: 999px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
 .toast.is-show { opacity: 1; }
-.stamp-pop { position: absolute; left: 50%; top: 20%; transform: translateX(-50%); font-size: 2.4em; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.6)); animation: pop 1.4s ease-out forwards; }
-@keyframes pop { 0% { opacity: 0; transform: translateX(-50%) scale(0.4); } 25% { opacity: 1; transform: translateX(-50%) scale(1.15); } 70% { opacity: 1; } 100% { opacity: 0; transform: translateX(-50%) translateY(-24px) scale(1); } }
 .roomchip { position: absolute; top: 6px; right: 10px; font-size: 0.6em; color: var(--gold-2); }
 
-.stampbar { display: flex; gap: 6px; overflow-x: auto; flex: 0 0 auto; padding: 2px 0; }
-.stamp { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 1px; font-size: 1em; padding: 4px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); }
+.stampbar { display: flex; gap: 6px; flex: 0 0 auto; padding: 2px 0; }
+.stamp { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 1em; padding: 4px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); }
 .stamp small { font-size: 0.52em; color: var(--dim); }
 .stamp--leave { color: #ffb3b9; }
+
+/* ---------- Build 7: スタンプ・定型文（PK表の右のボタン → トレイ → 吹き出し） ---------- */
+.emotebtn {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 13px;
+  display: grid; place-items: center;
+  background: rgba(20, 42, 74, 0.72); border: 1px solid var(--line); color: var(--ink);
+}
+.emotebtn .icon { width: 21px; height: 21px; }
+.emotebtn[aria-expanded='true'] { border-color: var(--gold); color: var(--gold-2); background: rgba(242, 194, 75, 0.16); }
+.emotetray {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+  width: min(330px, calc(100vw - 24px)); max-height: 62vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 8px 10px 10px; border-radius: 16px; display: flex; flex-direction: column; gap: 8px;
+  background: rgba(7, 17, 33, 0.97); border: 1px solid var(--line-strong); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+}
+.emotetray__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.7em; color: var(--gold-2); }
+.emotetray__close { flex: 0 0 auto; width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; color: var(--dim); background: rgba(255, 255, 255, 0.06); }
+.emotetray__close .icon { width: 15px; height: 15px; }
+.emotetray__group { display: flex; flex-direction: column; gap: 4px; }
+.emotetray__label { font-size: 0.58em; letter-spacing: 0.08em; color: var(--dim-2); }
+.emotetray__grid { display: grid; gap: 4px; }
+.emotetray__grid--stamp { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.emotetray__grid--stamp .emotepill { flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 46px; text-align: center; }
+.emotetray__grid--stamp .emotepill__face { font-size: 1.15em; }
+.emotetray__grid--stamp .emotepill__text { font-size: 0.55em; white-space: normal; }
+.emotetray__grid--taunt, .emotetray__grid--react { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.emotepill {
+  display: flex; align-items: center; gap: 5px; min-width: 0; padding: 5px 7px; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); color: var(--ink); text-align: left;
+}
+.emotepill:active { transform: scale(0.97); }
+.emotepill__face { flex: 0 0 auto; font-size: 1.05em; line-height: 1; }
+.emotepill__text { min-width: 0; font-size: 0.58em; line-height: 1.2; overflow-wrap: anywhere; }
+.emotebubble {
+  position: absolute; left: 50%; top: 20%; transform: translate(-50%, -50%); z-index: 5; pointer-events: none;
+  display: flex; align-items: center; gap: 6px; max-width: min(80%, 300px); padding: 7px 12px; border-radius: 16px;
+  background: rgba(4, 12, 24, 0.88); border: 1px solid var(--line-strong); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+}
+.emotebubble.is-show { animation: emoteIn 0.3s ease-out both; }
+.emotebubble[data-mine='true'] { border-color: rgba(242, 194, 75, 0.55); }
+.emotebubble[data-mine='false'] { border-color: rgba(88, 198, 255, 0.55); }
+.emotebubble__face { font-size: 1.25em; line-height: 1; }
+.emotebubble__text { font-size: 0.72em; font-weight: 800; overflow-wrap: anywhere; }
+.emotebubble__who { flex: 0 0 auto; padding-left: 6px; border-left: 1px solid var(--line); font-size: 0.54em; font-weight: 800; color: var(--gold-2); }
+@keyframes emoteIn {
+  0% { opacity: 0.86; transform: translate(-50%, -50%) scale(0.88); }
+  60% { opacity: 1; transform: translate(-50%, -50%) scale(1.03); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
 
 /* ---------- result ---------- */
 .result { position: relative; height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px 18px calc(24px + var(--safe-b)); display: flex; flex-direction: column; gap: 12px; }
