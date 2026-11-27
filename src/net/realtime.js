@@ -334,6 +334,18 @@ export class RealtimeClient {
     return sent;
   }
 
+  /**
+   * 同じ内容でも presence を送り直す（Build 10）。
+   * 前のセッションの phx_leave が遅れて届くと、自分や相手の在室が消えたまま
+   * になることがある。試合中にこれを繰り返して、消された在室を戻す。
+   */
+  retrack(name, meta) {
+    const entry = this.topics.get(name);
+    if (!entry) return false;
+    entry.tracked = null;
+    return this.track(name, meta);
+  }
+
   unsubscribe(name) {
     const entry = this.topics.get(name);
     if (!entry) return;

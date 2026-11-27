@@ -37,17 +37,17 @@ const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8B
  * 1. ビルド番号
  * ------------------------------------------------------------------ */
 
-test('Build 9 / v1.0.0 が全ファイルで揃っている', () => {
+test('Build 10 / v1.0.0 が全ファイルで揃っている', () => {
   assert.equal(CONFIG.version, '1.0.0');
-  assert.equal(CONFIG.build, 9);
+  assert.equal(CONFIG.build, 10);
   const pbx = read('ios/App/App.xcodeproj/project.pbxproj');
-  assert.deepEqual([...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((match) => match[1]), ['9', '9']);
+  assert.deepEqual([...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((match) => match[1]), ['10', '10']);
   assert.equal((pbx.match(/MARKETING_VERSION = 1\.0\.0;/g) || []).length, 2);
-  assert.match(read('package.json'), /Build 9/);
-  assert.match(read('src/config.js'), /build: 9/);
-  assert.match(read('README.md'), /v1\.0\.0 \/ Build 9/);
-  assert.match(read('docs/ios-testflight.yml'), /TestFlight Build 9/);
-  assert.match(read('docs/testflight-setup.md'), /\*\*9\*\*/);
+  assert.match(read('package.json'), /Build 10/);
+  assert.match(read('src/config.js'), /build: 10/);
+  assert.match(read('README.md'), /v1\.0\.0 \/ Build 10/);
+  assert.match(read('docs/ios-testflight.yml'), /TestFlight Build 10/);
+  assert.match(read('docs/testflight-setup.md'), /\*\*10\*\*/);
   /* 貼り替え用のワークフロー（docs）が8秒。実ファイル .github/... は GitHub の
      workflows 権限が無いため、トモアキさんがこの docs を貼り替える */
   assert.match(read('docs/ios-testflight.yml'), /roundSeconds: 8/);
@@ -197,7 +197,7 @@ test('結果カードのモデル: 720×900・勝敗・スコア・PKの○×・
   assert.equal(model.info, '7勝3敗 · 勝率70%');
   assert.match(model.tags, /#SHOOTOUT4/);
   assert.match(model.footer, /SHOOTOUT 4/);
-  assert.equal(model.build, 9);
+  assert.equal(model.build, 10);
 });
 
 test('結果カードのモデル: サドンデスは本数が増え、通信対戦は勝ち点を出す', () => {
