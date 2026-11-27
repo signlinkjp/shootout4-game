@@ -5,7 +5,7 @@ import {
   RealtimeClient, ShootoutSession, RankingNet, realtimeUrl, presenceMembers,
   quickChannel, roomChannel, matchChannel, rankChannel, normalizeCode, randomCode,
   onlineConfig, onlineConfigured, fallbackDirection, mergeRows, readRankCache,
-  writeRankCache, rankTable, ONLINE_TURN_MS, sessionTag,
+  writeRankCache, rankTable, ONLINE_TURN_MS, sessionTag, domesticRegion,
 } from '../src/net/online.js';
 
 /* ------------------------------------------------------------------ *\
@@ -802,8 +802,8 @@ test('Build 11: 試合中に presence（在室）を送り直さない（レー�
   const eventsA = [];
   const sa = makeSession(a, eventsA, { leaveGraceMs: 500 });
   const sb = makeSession(b, [], { leaveGraceMs: 500 });
-  sa.quickMatch({ scope: 'domestic', country: 'JP', profile: { nickname: 'A' } });
-  sb.quickMatch({ scope: 'domestic', country: 'JP', profile: { nickname: 'B' } });
+  sa.quickMatch({ scope: 'domestic', country: 'JP', language: 'ja', profile: { nickname: 'A' } });
+  sb.quickMatch({ scope: 'domestic', country: 'JP', language: 'ja', profile: { nickname: 'B' } });
   await flush(60);
   assert.ok(sa.matchName && sa.matchName === sb.matchName);
   const waiting = WAITING;
@@ -904,10 +904,12 @@ test('Build 11: 先に組む側でないほうは、pair で渡された部屋�
   session.reset();
 });
 
-test('Build 11: 部屋名が届かないときは2.5秒ごとに pair を頼み直し、最後は待機部屋を離れる', () => {
+test('Build 12: 部屋名が届かないときは pair を頼み直し、待機部屋からは抜けない（Build 11 の「3回で離れる」を廃止）', () => {
   const clock = fakeClock();
   const client = manualClient('zzz');
-  const session = new ShootoutSession({ client, schedule: clock.schedule, clear: clock.clear, waitLingerMs: 2500 });
+  const session = new ShootoutSession({
+    client, schedule: clock.schedule, clear: clock.clear, waitLingerMs: 2500, pairWaitMs: 2000,
+  });
   session.mode = 'quick';
   session.channel = WAITING;
   session.sessionTag = 'B1B1';
@@ -916,15 +918,17 @@ test('Build 11: 部屋名が届かないときは2.5秒ごとに pair を頼み�
   assert.equal(session.matchName, null);
   assert.equal(client.unsubscribed.length, 0, '相手を見た瞬間には待機部屋を切らない');
 
-  clock.runMs(2500);
   const asks = () => client.sent.filter((item) => item.event === 'pair' && item.payload.ask);
+  clock.runMs(2000);
   assert.equal(asks().length, 1, '1回目は pair を頼む');
   assert.equal(asks()[0].payload.to, 'aaa');
   assert.equal(client.unsubscribed.length, 0);
-  clock.runMs(2500);
+  clock.runMs(2000);
   assert.equal(asks().length, 2, '2回目も頼む');
-  clock.runMs(2500);
-  assert.deepEqual(client.unsubscribed, [WAITING], '3回で待機部屋を離れる（安全弁）');
+  /* 3回目は自分が部屋を作る。待機部屋は切らない（切ると相手とすれ違ったまま死ぬ） */
+  clock.runMs(2000);
+  assert.ok(session.matchName, '自分が部屋名を決める');
+  assert.equal(client.unsubscribed.length, 0, '待機部屋からは抜けない');
 });
 
 test('Build 11: 部屋名を頼まれたら、もう一度だけ部屋名を伝える', () => {
@@ -1017,4 +1021,133 @@ test('Build 11: phx_close を何度も繰り返しても、入り直しは間隔
   assert.equal(errors.includes('error'), true, '諦めたら error を出す（黙って死なない）');
   a.close();
   await flush(10);
+});
+
+/* ------------------------------------------------------------------ *\
+ * Build 12: 国内戦のクイックマッチが「相手を探しています」のまま進まない不具合
+ * ------------------------------------------------------------------ */
+
+test('Build 12: 国内戦の地域はユニフォーム国ではなく、アプリの言語/地域で決める', () => {
+  assert.equal(domesticRegion('ja'), 'JP');
+  assert.equal(domesticRegion('ja-JP'), 'JP');
+  assert.equal(domesticRegion('ko'), 'KR');
+  assert.equal(domesticRegion('zh-Hant'), 'TW');
+  assert.equal(domesticRegion('zh-Hans'), 'CN');
+  assert.equal(domesticRegion('pt'), 'BR');
+  assert.equal(domesticRegion(''), 'EN');
+  /* 言語が分からないときだけ端末の時間帯で推測する */
+  assert.equal(domesticRegion('', 'Asia/Tokyo'), 'JP');
+  assert.equal(domesticRegion('xx', 'Europe/Berlin'), 'DE');
+  assert.equal(quickChannel({ scope: 'domestic', region: domesticRegion('ja') }), 'shootout-quick:JP:domestic');
+});
+
+test('Build 12: 別のユニフォーム国でも、同じ言語の国内戦は同じ待機部屋で組めて3本目まで進む', async () => {
+  const broker = new Broker();
+  const a = makeClient(broker, 'aaa');
+  const b = makeClient(broker, 'bbb');
+  const eventsA = [];
+  const eventsB = [];
+  const sa = makeSession(a, eventsA);
+  const sb = makeSession(b, eventsB);
+
+  /* A は日本ユニフォーム、B はブラジルユニフォーム。どちらも日本語で国内戦 */
+  const nameA = sa.quickMatch({
+    scope: 'domestic', country: 'JP', language: 'ja', profile: { nickname: 'A', countryCode: 'JP' },
+  });
+  const nameB = sb.quickMatch({
+    scope: 'domestic', country: 'BR', language: 'ja', profile: { nickname: 'B', countryCode: 'BR' },
+  });
+  assert.equal(nameA, 'shootout-quick:JP:domestic');
+  assert.equal(nameB, 'shootout-quick:JP:domestic', 'ユニフォーム国（BR）で部屋を分けない');
+  assert.equal(sa.region, 'JP');
+  assert.equal(sb.region, 'JP');
+
+  await flush(60);
+  assert.ok(sa.matchName, 'A が組めた');
+  assert.equal(sa.matchName, sb.matchName, '同じ対戦部屋');
+  /* 表示カードは着用ユニフォーム国のまま */
+  assert.equal(sa.opponent.countryCode, 'BR');
+  assert.equal(sb.opponent.countryCode, 'JP');
+
+  for (const round of [0, 1, 2]) {
+    sa.pick(round, 'TL');
+    sb.pick(round, 'BR');
+    await flush(40);
+  }
+  const kicksA = eventsA.filter((event) => event.type === 'kick');
+  const kicksB = eventsB.filter((event) => event.type === 'kick');
+  assert.equal(kicksA.length, 3, '3本目までフリーズしない（A）');
+  assert.equal(kicksB.length, 3, '3本目までフリーズしない（B）');
+  assert.deepEqual(kicksA.map((event) => event.goal), kicksB.map((event) => event.goal));
+  assert.deepEqual(kicksA.map((event) => event.round), [0, 1, 2]);
+  sa.leave({ bye: false });
+  sb.leave({ bye: false });
+});
+
+test('Build 12: 部屋名を待つあいだは待機部屋を離れるタイマーを張らない（7.5秒たっても切らない）', () => {
+  const clock = fakeClock();
+  const client = manualClient('zzz');
+  const session = new ShootoutSession({
+    client, schedule: clock.schedule, clear: clock.clear, waitLingerMs: 2500, pairWaitMs: 2000,
+  });
+  session.mode = 'quick';
+  session.channel = WAITING;
+  session.sessionTag = 'B1B1';
+  session.openChannel(session.channel, session.meta({ mode: 'quick', tag: 'B1B1' }));
+  session.handlePresence(WAITING, [{ key: 'aaa', tag: 'A1A1' }, { key: 'zzz', tag: 'B1B1' }]);
+
+  assert.equal(session.matchName, null, '先に組む側ではないので部屋名はまだ決まらない');
+  assert.equal(session.waitLinger, null, '待機部屋を離れるタイマー（2.5秒×3）を張らない');
+  assert.ok(!client.unsubscribed.includes(WAITING), '待機部屋に残る');
+
+  /* 7.5秒ぶん以上、待つ（pair 待ちのタイマーだけが進む） */
+  for (let i = 0; i < 4; i += 1) clock.runMs(2000);
+  assert.ok(!client.unsubscribed.includes(WAITING), '7.5秒たっても待機部屋を切らない');
+  assert.equal(session.waitingChannel, WAITING);
+});
+
+test('Build 12: pair が届かないときは頼み直し、それでも来なければ自分が部屋を作る', () => {
+  const clock = fakeClock();
+  const client = manualClient('zzz');
+  const session = new ShootoutSession({ client, schedule: clock.schedule, clear: clock.clear, pairWaitMs: 2000 });
+  session.mode = 'quick';
+  session.channel = WAITING;
+  session.sessionTag = 'B1B1';
+  session.openChannel(session.channel, session.meta({ mode: 'quick', tag: 'B1B1' }));
+  session.handlePresence(WAITING, [{ key: 'aaa', tag: 'A1A1' }, { key: 'zzz', tag: 'B1B1' }]);
+
+  const asks = () => client.sent.filter((item) => item.event === 'pair' && item.payload.ask).length;
+  clock.runMs(2000);
+  assert.equal(asks(), 1, '2秒たっても来なければ部屋名を頼み直す');
+  clock.runMs(2000);
+  assert.equal(asks(), 2, 'もう一度頼む');
+  assert.equal(session.matchName, null);
+  clock.runMs(2000);
+  assert.equal(
+    session.matchName,
+    matchChannel('zzz', 'aaa', 'B1B1', 'A1A1'),
+    'それでも来なければ自分が名前を決める（同じ規則なので相手と同じ部屋になる）',
+  );
+  assert.ok(!client.unsubscribed.includes(WAITING), '待機部屋はまだ残す');
+});
+
+test('Build 12: 30秒タイムアウトしたら待機部屋を閉じる（在室に居座らない）', () => {
+  const clock = fakeClock();
+  const client = manualClient('me');
+  const events = [];
+  const session = new ShootoutSession({
+    client, schedule: clock.schedule, clear: clock.clear, onEvent: (event) => events.push(event),
+  });
+  const name = session.quickMatch({
+    scope: 'domestic', country: 'JP', language: 'ja', profile: { nickname: 'A' }, timeoutMs: 30000,
+  });
+  assert.equal(name, WAITING);
+  assert.equal(session.channel, WAITING);
+
+  clock.runMs(30000);
+  assert.ok(events.some((event) => event.type === 'timeout'), 'タイムアウトを伝える');
+  assert.deepEqual(client.unsubscribed, [WAITING], '待機部屋を1回だけ閉じる');
+  assert.equal(session.channel, null, '閉じた部屋に残らない');
+  assert.equal(session.waitingChannel, null);
+  assert.equal(session.waitTimer, null);
 });

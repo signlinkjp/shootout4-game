@@ -3,7 +3,8 @@
  *
  * 部屋はチャンネル名そのもの。データベースも認証も使わない。
  *
- *   クイックマッチ  shootout-quick:{world|国コード}:{domestic|world}
+ *   クイックマッチ  shootout-quick:{world|地域コード}:{domestic|world}
+ *                   （国内戦の地域はアプリの言語/地域。着用ユニフォームの国では分けない）
  *   フレンド対戦    shootout-room:{コード}
  *   対戦            shootout-match:{id~tag-id~tag}（2人のIDと試合ごとの目印から決まる名前）
  *   ランキング      shootout-rank:{scope}
@@ -49,9 +50,67 @@ export function onlineConfigured() {
 
 export const CHANNEL_PREFIX = 'shootout';
 
-export function quickChannel({ scope = 'domestic', country = 'JP' } = {}) {
-  const where = scope === 'world' ? 'world' : String(country || 'JP').toUpperCase();
-  return `shootout-quick:${where}:${scope === 'world' ? 'world' : 'domestic'}`;
+/*
+ * 国内戦のロビー分け（Build 12）。
+ * 以前は「着用ユニフォームの国（prefs.country）」で32分割していたため、同じ日本に
+ * いても「日本ユニフォーム」と「ブラジルユニフォーム」の2人が別の待機部屋に入り、
+ * 一生出会えなかった。国内戦の部屋は、見た目（ユニフォーム）ではなく
+ * アプリの言語/地域で決める。
+ */
+const REGION_BY_LANGUAGE = Object.freeze({
+  ja: 'JP',
+  en: 'EN',
+  'zh-hans': 'CN',
+  'zh-hant': 'TW',
+  ko: 'KR',
+  es: 'ES',
+  pt: 'BR',
+  fr: 'FR',
+  de: 'DE',
+  it: 'IT',
+  th: 'TH',
+  id: 'ID',
+});
+
+/* 言語が分からないときだけ、端末の時間帯で地域を推測する */
+const REGION_BY_TIMEZONE = Object.freeze({
+  'asia/tokyo': 'JP',
+  'asia/seoul': 'KR',
+  'asia/taipei': 'TW',
+  'asia/shanghai': 'CN',
+  'asia/hong_kong': 'TW',
+  'asia/bangkok': 'TH',
+  'asia/jakarta': 'ID',
+  'asia/makassar': 'ID',
+  'asia/jayapura': 'ID',
+  'america/sao_paulo': 'BR',
+  'europe/madrid': 'ES',
+  'europe/paris': 'FR',
+  'europe/berlin': 'DE',
+  'europe/rome': 'IT',
+});
+
+/**
+ * 国内戦の待機部屋に使う地域コード（例: ja → 'JP', ko → 'KR', zh-Hant → 'TW'）。
+ * 同じ言語のプレイヤーは、どのユニフォームを着ていても必ず同じ部屋に入る。
+ */
+export function domesticRegion(language = '', timeZone = '') {
+  const lang = String(language || '').toLowerCase().replaceAll('_', '-');
+  if (lang) {
+    if (REGION_BY_LANGUAGE[lang]) return REGION_BY_LANGUAGE[lang];
+    const base = lang.split('-')[0];
+    if (REGION_BY_LANGUAGE[base]) return REGION_BY_LANGUAGE[base];
+  }
+  const zone = String(timeZone || '').toLowerCase();
+  if (zone && REGION_BY_TIMEZONE[zone]) return REGION_BY_TIMEZONE[zone];
+  /* 分からないときは国際（英語）の部屋。ユニフォーム国では分けない */
+  return 'EN';
+}
+
+export function quickChannel({ scope = 'domestic', region = null, country = 'JP' } = {}) {
+  if (scope === 'world') return 'shootout-quick:world:world';
+  const where = String(region || country || 'JP').toUpperCase();
+  return `shootout-quick:${where}:domestic`;
 }
 
 export function roomChannel(code) {
@@ -112,6 +171,9 @@ const MATCH_JOIN_WAIT_MS = 15000;
 const WAIT_LINGER_MS = 2500;
 /** 相手が試合部屋に現れるまで待機部屋に残る上限（2.5秒 × 3回） */
 const WAIT_LINGER_ROUNDS = 3;
+/** 相手からの部屋名（pair）を待つ間隔と、自分から部屋を作るまでの頼み直し回数 */
+const PAIR_WAIT_MS = 2000;
+const PAIR_WAIT_ASKS = 2;
 const REVEAL_GRACE_MS = 1400;
 /**
  * 相手が在室から消えてから「退出」と決めるまでの猶予。
@@ -139,6 +201,7 @@ export class ShootoutSession {
     leaveGraceMs = OPPONENT_LEFT_GRACE_MS,
     helloReplyMs = HELLO_REPLY_MS,
     waitLingerMs = WAIT_LINGER_MS,
+    pairWaitMs = PAIR_WAIT_MS,
   } = {}) {
     this.client = client;
     this.onEvent = onEvent;
@@ -151,6 +214,11 @@ export class ShootoutSession {
     this.leaveGraceMs = Number(leaveGraceMs) >= 0 ? Number(leaveGraceMs) : OPPONENT_LEFT_GRACE_MS;
     this.helloReplyMs = Number(helloReplyMs) >= 0 ? Number(helloReplyMs) : HELLO_REPLY_MS;
     this.waitLingerMs = Number(waitLingerMs) >= 0 ? Number(waitLingerMs) : WAIT_LINGER_MS;
+    this.pairWaitMs = Number(pairWaitMs) >= 0 ? Number(pairWaitMs) : PAIR_WAIT_MS;
+    this.pairWait = null;
+    this.pairWaitRounds = 0;
+    this.waitingChannel = null;
+    this.region = null;
     this.mode = null;
     this.scope = 'domestic';
     this.profile = { nickname: 'PLAYER', countryCode: 'JP', pro: false, level: 'normal' };
@@ -168,6 +236,7 @@ export class ShootoutSession {
     this.waitTimer = null;
     this.tickTimer = null;
     this.revealTimer = null;
+    this.waitLinger = null;
     this.remainingMs = 0;
     this.deadline = 0;
     this.opponentSeen = false;
@@ -231,7 +300,14 @@ export class ShootoutSession {
     };
   }
 
-  quickMatch({ scope = 'domestic', country = 'JP', profile = {}, timeoutMs = MATCH_TIMEOUT_MS } = {}) {
+  /**
+   * クイックマッチを始める。
+   * `country` は表示用（着用ユニフォーム国）。国内戦の部屋分けに使う地域は
+   * `language` / `timeZone` から決める（Build 12）。
+   */
+  quickMatch({
+    scope = 'domestic', country = 'JP', language = '', timeZone = '', profile = {}, timeoutMs = MATCH_TIMEOUT_MS,
+  } = {}) {
     this.reset();
     this.mode = 'quick';
     this.sessionTag = sessionTag(this.random);
@@ -241,8 +317,14 @@ export class ShootoutSession {
       this.emit({ type: 'error', reason: 'pro-world' });
       return null;
     }
-    this.profile = { ...this.profile, ...profile, countryCode: country || profile.countryCode || 'JP' };
-    const name = quickChannel({ scope: this.scope, country: this.profile.countryCode });
+    /* 表示は着用ユニフォーム国、部屋分けは言語/地域。2つを混ぜない（Build 12） */
+    this.profile = {
+      ...this.profile,
+      ...profile,
+      countryCode: String(profile.countryCode || country || 'JP').toUpperCase(),
+    };
+    this.region = this.scope === 'world' ? 'world' : domesticRegion(language || profile.language || '', timeZone);
+    const name = quickChannel({ scope: this.scope, region: this.region });
     this.openWaiting(name, { timeoutMs });
     return name;
   }
@@ -268,6 +350,11 @@ export class ShootoutSession {
         this.waitTimer = null;
         if (!this.matchName) {
           this.remainingMs = 0;
+          /*
+           * Build 12: タイムアウトした端末が待機部屋の在室に居座ると、後から来た
+           * 人のペアリング（index % 2）が狂う。待機部屋は必ず閉じる。
+           */
+          this.closeWaiting();
           this.emit({ type: 'timeout', mode: this.mode });
         }
       }, timeoutMs);
@@ -343,10 +430,15 @@ export class ShootoutSession {
     if (!partnerKey || this.matchName) return null;
     const given = typeof room === 'string' && room.startsWith('shootout-match:') ? room : null;
     if (!given && !initiator) {
-      /* 相手（先に組む側）から部屋名が届くのを待つ。待つ間も待機部屋には残る */
+      /*
+       * 相手（先に組む側）から部屋名が届くのを待つ。待つ間も待機部屋には残る。
+       * Build 12: ここで armWaitRelease() を呼ぶと、7.5秒後にまだ部屋名が決まって
+       * いないのに待機部屋を切ってしまい、画面が「相手を探しています」のまま
+       * 通信ごと死んでいた。待機部屋を離れるのは matchName が決まったあとだけ。
+       */
       this.candidate = { key: partnerKey, tag: this.tagOf(partnerKey) };
       this.waitingChannel = this.channel;
-      this.armWaitRelease();
+      this.armPairWait();
       this.emit({ type: 'waiting', present: this.presence.length, remainingMs: this.remainingMs });
       return null;
     }
@@ -359,6 +451,10 @@ export class ShootoutSession {
     this.matchName = name;
     this.matchToken = this.sessionTag || name.slice(-8);
     this.candidate = null;
+    if (this.pairWait) {
+      this.clear(this.pairWait);
+      this.pairWait = null;
+    }
     this.host = this.client.clientId < partnerKey;
     this.mySide = this.host ? 'home' : 'away';
     if (this.waitTimer) {
@@ -480,21 +576,51 @@ export class ShootoutSession {
     this.waitLinger = this.schedule(() => {
       this.waitLinger = null;
       this.waitLingerRounds += 1;
-      if (!this.opponentSeen && this.matchName && this.waitLingerRounds < WAIT_LINGER_ROUNDS) {
-        this.armWaitRelease();
+      if (!this.matchName) {
+        /* まだ部屋名が決まっていない＝待機部屋を離れてはいけない（Build 12） */
+        if (this.candidate) this.armPairWait();
         return;
       }
-      /* まだ部屋名が届いていない（相手が先に組む側）→ もう一度 pair を頼む */
-      if (!this.matchName && this.candidate && this.waitLingerRounds < WAIT_LINGER_ROUNDS) {
-        this.client.broadcast(this.waitingChannel, 'pair', {
-          from: this.client.clientId,
-          to: this.candidate.key,
-          ask: true,
-        });
+      if (!this.opponentSeen && this.waitLingerRounds < WAIT_LINGER_ROUNDS) {
         this.armWaitRelease();
         return;
       }
       this.releaseWaiting();
+    }, delay);
+  }
+
+  /**
+   * 相手（先に組む側）からの部屋名を待つあいだのタイマー（Build 12）。
+   * 待機部屋からは絶対に抜けない。1〜2回目は pair を頼み直し、それでも来なければ
+   * 自分が名前を決めて試合部屋を作る（相手は同じ規則で同じ名前を出すので合流できる）。
+   * 相手の目印（tag）がまだ分からないときは、別々の名前を作ってすれ違うので作らない。
+   */
+  armPairWait(delay = this.pairWaitMs) {
+    if (this.pairWait) {
+      this.clear(this.pairWait);
+      this.pairWait = null;
+    }
+    this.pairWait = this.schedule(() => {
+      this.pairWait = null;
+      if (this.matchName || !this.candidate) return;
+      const partnerKey = this.candidate.key;
+      this.pairWaitRounds += 1;
+      const tag = this.tagOf(partnerKey);
+      this.candidate = { key: partnerKey, tag };
+      if (this.pairWaitRounds <= PAIR_WAIT_ASKS || !tag) {
+        /* もう一度、部屋名を教えてくれと頼む */
+        const channel = this.waitingChannel || this.channel;
+        if (!channel) return;
+        this.client.broadcast(channel, 'pair', {
+          from: this.client.clientId,
+          to: partnerKey,
+          ask: true,
+        });
+        this.armPairWait();
+        return;
+      }
+      /* それでも届かない → 自分が名前を決める（pair が落ちても同じ部屋に集まる） */
+      this.pairWith(partnerKey, { initiator: true });
     }, delay);
   }
 
@@ -559,10 +685,32 @@ export class ShootoutSession {
     this.scheduleOpponentLeftCheck();
   }
 
+  /** 待機部屋を閉じる（部屋名が決まらずに終わるとき・タイムアウト） */
+  closeWaiting() {
+    this.releaseWaiting();
+    if (this.channel && this.channel !== this.waitingChannel && !this.matchName) {
+      this.client.unsubscribe(this.channel);
+      this.channel = null;
+    }
+    if (this.waitTimer) {
+      this.clear(this.waitTimer);
+      this.waitTimer = null;
+    }
+    if (this.tickTimer) {
+      this.clear(this.tickTimer);
+      this.tickTimer = null;
+    }
+    this.deadline = 0;
+  }
+
   releaseWaiting() {
     if (this.waitLinger) {
       this.clear(this.waitLinger);
       this.waitLinger = null;
+    }
+    if (this.pairWait) {
+      this.clear(this.pairWait);
+      this.pairWait = null;
     }
     for (const id of this.pairTimers) this.clear(id);
     this.pairTimers = [];
@@ -840,7 +988,12 @@ export class ShootoutSession {
     this.matchWatchdog = null;
     this.waitLinger = null;
     this.waitLingerRounds = 0;
+    if (this.pairWait) this.clear(this.pairWait);
+    this.pairWait = null;
+    this.pairWaitRounds = 0;
+    this.region = null;
     this.channel = null;
+    this.waitingChannel = null;
     this.matchToken = '';
     this.sessionTag = '';
     this.candidate = null;

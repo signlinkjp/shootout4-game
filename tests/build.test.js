@@ -26,24 +26,24 @@ function pngHeader(path) {
   };
 }
 
-test('Build 11 / v1.0.0 に全ファイルのビルド番号が揃っている', () => {
+test('Build 12 / v1.0.0 に全ファイルのビルド番号が揃っている', () => {
   assert.equal(CONFIG.version, '1.0.0');
-  assert.equal(CONFIG.build, 11);
+  assert.equal(CONFIG.build, 12);
 
   const pbx = read('ios/App/App.xcodeproj/project.pbxproj');
   const builds = [...pbx.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)].map((match) => match[1]);
-  assert.deepEqual(builds, ['11', '11']);
+  assert.deepEqual(builds, ['12', '12']);
   assert.equal((pbx.match(/MARKETING_VERSION = 1\.0\.0;/g) || []).length, 2);
 
   const pkg = JSON.parse(read('package.json'));
   assert.equal(pkg.version, '1.0.0');
-  assert.match(pkg.description, /Build 11/);
+  assert.match(pkg.description, /Build 12/);
 
-  assert.match(read('src/config.js'), /build: 11/);
+  assert.match(read('src/config.js'), /build: 12/);
   assert.match(read('src/ui/home.js'), /V\$\{CONFIG\.version\} · BUILD \$\{CONFIG\.build\}/);
   assert.match(read('src/ui/misc.js'), /BUILD \$\{CONFIG\.build\}/);
-  assert.match(read('README.md'), /Build 11/);
-  assert.match(read('docs/testflight-setup.md'), /\*\*11\*\*/);
+  assert.match(read('README.md'), /Build 12/);
+  assert.match(read('docs/testflight-setup.md'), /\*\*12\*\*/);
 });
 
 test('アイコンは IPKSF 公式エンブレムで、iOS と assets が同一（旧アイコンが残っていない）', () => {
@@ -72,11 +72,11 @@ test('アイコンは IPKSF 公式エンブレムで、iOS と assets が同一�
   }
 });
 
-test('配布用 www/ が作れて、ビルド11のアイコンとコードが同期している', async () => {
+test('配布用 www/ が作れて、ビルド12のアイコンとコードが同期している', async () => {
   await makeWww();
   const wwwIcon = pngHeader('www/assets/icon-1024.png');
   assert.equal(wwwIcon.hash, pngHeader('assets/icon-1024.png').hash);
-  assert.match(read('www/src/config.js'), /build: 11/);
+  assert.match(read('www/src/config.js'), /build: 12/);
   assert.match(read('www/src/three/characters.js'), /buildCharacter/);
   assert.match(read('www/src/core/registration.js'), /IPKSF/);
   assert.match(read('www/src/core/ranking.js'), /pointsFor/);

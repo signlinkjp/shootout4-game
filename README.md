@@ -1,6 +1,6 @@
 # SHOOTOUT 4 — IPKSF World Penalty Championship
 
-iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 11）。
+iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 12）。
 `クイック対戦`・`CPU対戦`・`フレンド対戦`・`世界ランキング`・`ロッカー（キャラクター＋4部位）`・
 `IPKSF 公式加盟（PRO・買い切り ¥300）` を、Capacitor 8 + 素の HTML/CSS/JS（ES Modules）で実装しています。
 
@@ -148,6 +148,12 @@ npx cap sync ios            # www → ios/App/App/public
 
 ## バージョン
 
+- v1.0.0 / Build 12（2026-11-28）
+  - **国内戦のクイックマッチが「相手を探しています」のまま進まない不具合を修正**
+    - **待機部屋をユニフォーム国で分けていた**：`openQuick()` が着用ユニフォームの国（`prefs.country`）をそのまま部屋名に渡していたため、同じ日本にいても「日本ユニフォーム」と「ブラジルユニフォーム」の2人が `shootout-quick:JP:domestic` と `shootout-quick:BR:domestic` に分かれ、一生出会えなかった。国内戦の部屋はアプリの言語/地域（`domesticRegion`: ja→`JP`・ko→`KR`・zh-Hant→`TW`・zh-Hans→`CN`・en→`EN` など、言語が分からないときだけ端末の時間帯から推測）で決めるようにした。表示カードの国旗はこれまでどおり着用ユニフォーム国
+    - **待機側が部屋名の確定前に待機部屋を切っていた**：`pairWith()` の「相手から部屋名が届くのを待つ」側でも2.5秒×3回の`armWaitRelease()`を張っていたため、7.5秒後にまだ部屋名が決まっていないのに待機部屋を`unsubscribe`し、通信ごと死んでいた。部屋名が決まるまで待機部屋からは抜けないようにし、`pair`が届かないときは2秒ごとに頼み直し（`ask`）、それでも届かなければ自分が同じ規則で部屋名を決めて合流する
+    - **30秒タイムアウト時に待機部屋を閉じていなかった**：`timeout`を出すだけで`unsubscribe`していなかったため、タイムアウトした端末が在室に居座って後から来た人のペアリングを狂わせていた。タイムアウト時は待機部屋を閉じて`channel = null`にする
+  - 本番 Supabase へ Playwright 2ブラウザで実測（別ユニフォーム国同士の国内戦→3本目、連続クイックマッチ、ルーム対戦）：フリーズ・`Client presence rate limit exceeded`・予期せぬ`phx_close`は0件
 - v1.0.0 / Build 11（2026-11-28）
   - **通信が途中でフリーズする真因を修正（presence のレート制限）**：Build 10 で入れた「3秒ごとに自分の在室（presence track）を送り直す」処理が Supabase Realtime の `Client presence rate limit exceeded` に当たり、サーバーから試合チャンネルを `phx_close` で強制切断されていた。送り直し（`startPresenceBeat` / `retrackMatch`）を完全に廃止し、`presence track` はチャンネル `joined` 時の1回だけにした
   - **試合チャンネル名を毎試合一意に**：`shootout-match:{id~tag-id~tag}`。クイック・ルームとも開始時に4文字の `sessionTag` を作り、待機部屋の在室に載せて、2人のIDと目印から毎回違う名前を作る。前の試合の `phx_leave`（在室の `leaves`）が新しい試合部屋に届くことが物理的に起きなくなった（Build 10 で在室を送り直さざるを得なかった原因そのもの）

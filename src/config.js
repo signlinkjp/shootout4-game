@@ -9,7 +9,7 @@ export const CONFIG = Object.freeze({
   brand: 'IPKSF',
   federation: 'INTERNATIONAL PENALTY KICK SHOOTOUT FEDERATION',
   version: '1.0.0',
-  build: 11,
+  build: 12,
   bundleId: 'jp.signlink.Shootout4',
 
   iap: {

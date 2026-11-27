@@ -927,6 +927,14 @@ function ensureSession() {
   return session;
 }
 
+function deviceTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch {
+    return '';
+  }
+}
+
 function onlineProfile() {
   return {
     nickname: (prefs.nickname || registration.userName || registration.teamName || 'PLAYER').slice(0, 12),
@@ -1051,7 +1059,19 @@ function openQuick() {
   }
   ensureSession();
   clearPendingStart();
-  session.quickMatch({ scope: online.scope, country: onlineProfile().countryCode, profile: onlineProfile() });
+  /*
+   * Build 12: 国内戦の部屋分けは「着用ユニフォームの国」ではなく、アプリの言語/地域。
+   * ユニフォーム国で分けると、同じ日本にいても日本ユニフォームとブラジルユニフォームの
+   * 2人が別の待機部屋に入り、一生出会えなかった。country は表示用として渡す。
+   */
+  const profile = onlineProfile();
+  session.quickMatch({
+    scope: online.scope,
+    country: profile.countryCode,
+    language: prefs.language,
+    timeZone: deviceTimeZone(),
+    profile,
+  });
   online.searching = true;
   online.opponent = null;
   online.status = '';
