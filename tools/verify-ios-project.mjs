@@ -120,6 +120,10 @@ try {
     'www/src/core/rules.js', 'www/src/net/online.js', 'www/src/platform/iap.js',
     'www/vendor/three.module.min.js', 'www/assets/icon-1024.png', 'www/assets/emblem-512.png',
     'www/assets/flags/jp-96.png',
+    /* Build 8: 効果音ラボの MP3（iOS のバンドルにも入る） */
+    'www/assets/sfx/people-stadium-cheer1.mp3', 'www/assets/sfx/air-horn1.mp3',
+    'www/assets/sfx/trumpet1.mp3', 'www/assets/sfx/mens-yeah1.mp3',
+    'www/assets/sfx/people-shout-oo1.mp3', 'www/assets/sfx/people-performance-uwaa1.mp3',
   ];
   check('www: 配布用ファイルが作れる', www.every((path) => exists(path)), www.filter((path) => !exists(path)));
   const index = read('www/index.html');

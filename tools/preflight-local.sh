@@ -59,5 +59,11 @@ test -f www/src/main.js
 test -f www/src/net/online.js
 test -f www/vendor/three.module.min.js
 test -f www/assets/icon-1024.png
+# Build 8: 効果音ラボの MP3（6本・1MB 未満）が必ずバンドルに入る
+for name in people-stadium-cheer1 air-horn1 trumpet1 mens-yeah1 people-shout-oo1 people-performance-uwaa1; do
+  test -f "www/assets/sfx/${name}.mp3"
+  test "$(wc -c < "www/assets/sfx/${name}.mp3")" -gt 10000
+done
+test "$(du -cb www/assets/sfx/*.mp3 | tail -1 | cut -f1)" -lt 512000
 echo "www-ok"
 echo "ALL PREFLIGHT GUARDS PASSED"

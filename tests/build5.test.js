@@ -112,9 +112,10 @@ test('2. 判定は音の演出だけで盛り上げる（音声合成なし・�
   assert.match(audio, /export function crowdOoh/, 'セーブ: 観客のどよめき');
   assert.match(audio, /export function gloveClear/, 'セーブ: グローブストップ＆クリア');
   assert.match(audio, /export function crowdAww/, 'ミス: 観客の落胆');
-  assert.match(audio, /goal: \(\) => \{ stadiumHorn\(\); victoryFanfare\(\); \}/);
-  assert.match(audio, /save: \(\) => \{ gloveClear\(\); crowdOoh\(\); \}/);
-  assert.match(audio, /miss: \(\) => \{ crowdAww\(\); \}/);
+  /* Build 8: MP3 が無いときは、このシンセ音へ自動で落ちる（SHOWCASE は各関数へ） */
+  assert.match(audio, /goal: goalShowcase/);
+  assert.match(audio, /save: saveShowcase/);
+  assert.match(audio, /miss: missShowcase/);
   /* ゴールは既存の goalRoar() / crowdSurge() に重ねる（main.js 側） */
   assert.match(read('src/main.js'), /goalRoar\(2\.4\); crowdSurge\(1\.1\)/);
 
@@ -235,8 +236,8 @@ test('4c. キーパーの選択は「画面で押した位置」と一致する�
  * 5. ビルド番号
  * ------------------------------------------------------------------ */
 
-test('5. Build 7 / v1.0.0 で揃っている', () => {
+test('5. Build 8 / v1.0.0 で揃っている', () => {
   assert.equal(CONFIG.version, '1.0.0');
-  assert.equal(CONFIG.build, 7);
-  assert.equal((read('ios/App/App.xcodeproj/project.pbxproj').match(/CURRENT_PROJECT_VERSION = 7;/g) || []).length, 2);
+  assert.equal(CONFIG.build, 8);
+  assert.equal((read('ios/App/App.xcodeproj/project.pbxproj').match(/CURRENT_PROJECT_VERSION = 8;/g) || []).length, 2);
 });

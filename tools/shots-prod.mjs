@@ -1,5 +1,5 @@
 /**
- * SHOOTOUT 4 — 実ブラウザ E2E（Chromium / Playwright） Build 6
+ * SHOOTOUT 4 — 実ブラウザ E2E（Chromium / Playwright） Build 8
  *
  *   node tools/shots-prod.mjs          … 全チェック＋スクリーンショット
  *   node tools/shots-prod.mjs smoke    … 起動確認だけ
@@ -520,6 +520,63 @@ async function buildSeven(page) {
       timeoutStuck);
     await page.evaluate(() => window.__SHOOTOUT__.go('home'));
     await sleep(250);
+
+    /* ============================================================== *\
+     * L6. Build 8（効果音ラボの本物のスタジアム音 MP3）
+     * ============================================================== */
+    await page.evaluate(() => window.__SHOOTOUT__.go('settings'));
+    await sleep(220);
+    if (await page.locator('[data-testid="sound-test"]').count()) {
+      await page.click('[data-testid="sound-test"]');
+    }
+    await sleep(260);
+    let settled = false;
+    try {
+      await page.waitForFunction(() => {
+        const values = Object.values(window.__SHOOTOUT__.audio.samples || {});
+        return values.length === 6 && values.every((value) => value === 'ready' || value === 'failed');
+      }, null, { timeout: 8000 });
+      settled = true;
+    } catch {
+      settled = false;
+    }
+    const sfx = await page.evaluate(async () => {
+      const names = [
+        'people-stadium-cheer1.mp3', 'air-horn1.mp3', 'trumpet1.mp3',
+        'mens-yeah1.mp3', 'people-shout-oo1.mp3', 'people-performance-uwaa1.mp3',
+      ];
+      const files = {};
+      for (const name of names) {
+        try {
+          const response = await fetch(`assets/sfx/${name}`);
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          files[name] = { ok: response.ok, bytes: bytes.length };
+        } catch (error) {
+          files[name] = { ok: false, bytes: 0, error: String(error) };
+        }
+      }
+      window.__SHOOTOUT__.__sfxBeforeGoal = window.__SHOOTOUT__.audio.voices.goal ?? 0;
+      const result = window.__SHOOTOUT__.voice('goal');
+      const audio = window.__SHOOTOUT__.audio;
+      return { files, result, samples: audio.samples, source: audio.voice?.source ?? '', kind: audio.voice?.kind ?? '' };
+    });
+    const expected = {
+      'people-stadium-cheer1.mp3': 115982,
+      'air-horn1.mp3': 44352,
+      'trumpet1.mp3': 47019,
+      'mens-yeah1.mp3': 38242,
+      'people-shout-oo1.mp3': 12537,
+      'people-performance-uwaa1.mp3': 85888,
+    };
+    const sfxProblems = Object.entries(expected)
+      .filter(([name, size]) => !(sfx.files[name]?.ok && sfx.files[name]?.bytes === size))
+      .map(([name]) => name);
+    check('L6 効果音ラボの MP3 6本が配信され、デコードできてゴールで本物の歓声が鳴る',
+      settled && sfxProblems.length === 0
+      && Object.values(sfx.samples).every((value) => value === 'ready')
+      && sfx.result?.mode === 'showcase' && sfx.source === 'mp3' && sfx.kind === 'goal',
+      { settled, sfxProblems, samples: sfx.samples, source: sfx.source, kind: sfx.kind, files: sfx.files });
+    await page.evaluate(() => window.__SHOOTOUT__.go('home'));
 }
 
 async function main() {
@@ -546,7 +603,7 @@ async function main() {
       await page.evaluate(() => window.__SHOOTOUT__.skipOpening());
       await sleep(420);
       await buildSeven(page);
-      check('I1 コンソールエラー 0（Build 7 の通し）', errors.length === 0, errors.slice(0, 5));
+      check('I1 コンソールエラー 0（Build 8 の通し）', errors.length === 0, errors.slice(0, 5));
       await context.close();
     } finally {
       await browser.close();

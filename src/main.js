@@ -36,7 +36,7 @@ import {
 import {
   unlockAudio, configureAudio, click, select as selectSound, whistle, kickSound, netSound,
   gloveSound, goalRoar, countdownTick, startCrowd, stopCrowd, crowdSurge,
-  openingCrowd, audioState, uiSwitch, purchaseChime, testSound, voice, ensureAudioRunning,
+  openingCrowd, audioState, uiSwitch, purchaseChime, testSound, voice, champion, ensureAudioRunning,
   suspendForBackground, resumeFromBackground,
 } from './audio.js';
 import {
@@ -840,6 +840,8 @@ function finishMatch() {
   stopCrowd();
   screen = 'result';
   render();
+  /* Build 8: 決着の華やかな締め（勝ちはファンファーレ＋大歓声、負けは小さな反応） */
+  champion({ win: state.winner === 'me' });
 }
 
 function quitMatch() {

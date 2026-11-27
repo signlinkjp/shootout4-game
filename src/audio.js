@@ -27,6 +27,11 @@ const state = {
   voices: {},
   lastVoice: null,
   recoveries: 0,
+  /* Build 8: 効果音ラボの MP3（デコード済みバッファと、Context を作り直すための生バイト） */
+  samples: Object.create(null),
+  sampleBytes: Object.create(null),
+  sampleState: Object.create(null),
+  sampleAt: Object.create(null),
   /* Build 5/6: バックグラウンドから戻った最初の操作で、1回だけ強制的に音を起こし直す */
   needsGestureRecovery: false,
 };
@@ -75,6 +80,10 @@ function createContext() {
   state.crowdSource = null;
   state.crowdGain = null;
   state.crowdFilter = null;
+  /* Build 8: デコード済みバッファは古い Context のもの。生バイトから作り直す
+     （iOS で復帰時に Context を捨てても、MP3 を取り直さずに済む） */
+  state.samples = Object.create(null);
+  for (const key of Object.keys(state.sampleBytes)) decodeSample(key);
   applyVolumes();
   return true;
 }
@@ -122,6 +131,8 @@ export function unlockAudio() {
     silentPoke();
     /* iOS: アプリ側の Audio Session を playback にする（AppDelegate のブリッジ） */
     activateBridge();
+    /* Build 8: 最初の操作で本物のスタジアム音（MP3）を取りに行く */
+    ensureSamples();
     if (!state.unlocked) {
       state.unlocked = true;
       ensureSilentAudio();
@@ -269,15 +280,21 @@ export function gloveSound() {
 export function goalRoar(seconds = 2.2) {
   if (!state.settings.sound) return;
   const d = Math.max(0.6, Math.min(3.4, seconds));
-  noise({ dur: d, gain: 0.36, low: 220, high: 4400, q: 0.5, bus: 'crowdBus' });
-  noise({ dur: d * 0.8, gain: 0.2, low: 900, high: 6400, q: 0.4, bus: 'crowdBus' });
-  /* スタジアムホーン */
-  tone({ freq: 233, end: 233, dur: 0.5, gain: 0.075, type: 'sawtooth', bus: 'sfxBus' });
-  tone({ freq: 349, end: 349, dur: 0.5, gain: 0.05, type: 'sawtooth', bus: 'sfxBus' });
-  /* ファンファーレ */
-  [523.25, 659.25, 783.99, 1046.5].forEach((freq, index) => {
-    tone({ freq, end: freq, dur: 0.32, gain: 0.035, type: 'triangle', delay: 0.1 + index * 0.11 });
-  });
+  /* Build 8: 本物の歓声（MP3）が鳴らせる環境では、それを主役にして
+     ノイズの盛り上げは控えめに。シンセのホーン／ファンファーレは重ねない
+     （voice('goal') が本物のホーン＋ファンファーレを鳴らすため）。 */
+  const realistic = Boolean(state.samples.cheer);
+  noise({ dur: d, gain: realistic ? 0.22 : 0.36, low: 220, high: 4400, q: 0.5, bus: 'crowdBus' });
+  noise({ dur: d * 0.8, gain: realistic ? 0.11 : 0.2, low: 900, high: 6400, q: 0.4, bus: 'crowdBus' });
+  if (!realistic) {
+    /* スタジアムホーン */
+    tone({ freq: 233, end: 233, dur: 0.5, gain: 0.075, type: 'sawtooth', bus: 'sfxBus' });
+    tone({ freq: 349, end: 349, dur: 0.5, gain: 0.05, type: 'sawtooth', bus: 'sfxBus' });
+    /* ファンファーレ */
+    [523.25, 659.25, 783.99, 1046.5].forEach((freq, index) => {
+      tone({ freq, end: freq, dur: 0.32, gain: 0.035, type: 'triangle', delay: 0.1 + index * 0.11 });
+    });
+  }
   vibrate([40, 40, 70]);
 }
 
@@ -293,6 +310,167 @@ export function purchaseChime(ok = true) {
     tone({ freq, end: freq, dur: 0.26, gain: 0.05, type: 'triangle', delay: index * 0.1 });
   });
   vibrate(ok ? [30, 30, 60] : 40);
+}
+
+/* ------------------------------------------------------------------ *\
+ * 本物のスタジアムの音（Build 8: 効果音ラボの MP3）
+ *
+ * 出典: 効果音ラボ（https://soundeffect-lab.info/）。商用利用無料・クレジット表記
+ * 不要の音源を、ゲーム内の演出音としてそのまま使う（再配布には当たらない）。
+ *
+ *   fetch → ArrayBuffer → decodeAudioData でデコードして state.samples に持つ。
+ *   生のバイトも state.sampleBytes に残すので、iOS で AudioContext を閉じて
+ *   作り直しても、取り直さずにもう一度デコードするだけで鳴らせる。
+ *
+ *   ！ ここは絶対に throw しない。オフライン・ブラウザ制約・Node / Playwright の
+ *   ように fetch も decodeAudioData も使えない環境では、playSample() が false を
+ *   返し、呼び出し側（SHOWCASE）が従来の Web Audio シンセ音へ落ちる。
+ * ------------------------------------------------------------------ */
+
+/** 使う MP3（すべて assets/sfx/ に同梱） */
+export const SFX_FILES = Object.freeze({
+  cheer: 'people-stadium-cheer1.mp3', /* スタジアムの大歓声＋拍手 */
+  horn: 'air-horn1.mp3', /* エアーホーン */
+  fanfare: 'trumpet1.mp3', /* ラッパのファンファーレ */
+  yeah: 'mens-yeah1.mp3', /* 男衆の「イエーイ！」 */
+  oo: 'people-shout-oo1.mp3', /* 男声の「オーッ！」 */
+  uwaa: 'people-performance-uwaa1.mp3', /* 「わぁーーっ♪」の歓声 */
+});
+
+const SFX_BASE = 'assets/sfx/';
+
+function sampleUrl(key) {
+  const path = `${SFX_BASE}${SFX_FILES[key]}`;
+  try {
+    const base = typeof document !== 'undefined' && document.baseURI ? document.baseURI : 'http://localhost/';
+    return new URL(path, base).href;
+  } catch {
+    return path;
+  }
+}
+
+/** 生バイト → デコード済みバッファ（失敗しても state に failed を残すだけ） */
+function decodeSample(key) {
+  const ctx = state.ctx;
+  const bytes = state.sampleBytes[key];
+  if (!ctx || !bytes || typeof ctx.decodeAudioData !== 'function') return false;
+  state.sampleState[key] = 'decoding';
+  let request = null;
+  try {
+    request = ctx.decodeAudioData(bytes.slice(0));
+  } catch {
+    request = null;
+  }
+  if (!request || typeof request.then !== 'function') {
+    /* コールバック形式しか無い／そもそも非対応 → シンセ音へ */
+    state.sampleState[key] = 'failed';
+    return false;
+  }
+  request.then(
+    (buffer) => {
+      if (!buffer) {
+        state.sampleState[key] = 'failed';
+        return;
+      }
+      state.samples[key] = buffer;
+      state.sampleState[key] = 'ready';
+    },
+    () => {
+      state.sampleState[key] = 'failed';
+    },
+  );
+  return true;
+}
+
+/**
+ * MP3 を取りに行く（何度呼んでもよい）。
+ *   · 取得中／デコード中／再生可能 なら何もしない
+ *   · 失敗は 15 秒あけて再挑戦（一瞬の通信断で永久にシンセ音にならないように）
+ */
+function ensureSamples() {
+  if (typeof fetch !== 'function') return;
+  const now = Date.now();
+  for (const key of Object.keys(SFX_FILES)) {
+    const status = state.sampleState[key];
+    if (status === 'loading' || status === 'decoding' || status === 'ready' || status === 'bytes') continue;
+    if (status === 'failed' && now - (state.sampleAt[key] || 0) < 15000) continue;
+    state.sampleState[key] = 'loading';
+    state.sampleAt[key] = now;
+    let request = null;
+    try {
+      request = fetch(sampleUrl(key), { cache: 'force-cache' });
+    } catch {
+      request = null;
+    }
+    if (!request || typeof request.then !== 'function') {
+      state.sampleState[key] = 'failed';
+      continue;
+    }
+    request
+      .then((response) => {
+        if (!response || response.ok === false) throw new Error('sfx fetch failed');
+        if (typeof response.arrayBuffer !== 'function') throw new Error('sfx arrayBuffer unsupported');
+        return response.arrayBuffer();
+      })
+      .then((bytes) => {
+        if (!bytes || !bytes.byteLength) throw new Error('sfx empty');
+        state.sampleBytes[key] = bytes;
+        state.sampleState[key] = 'bytes';
+        decodeSample(key);
+      })
+      .catch(() => {
+        state.sampleState[key] = 'failed';
+        state.sampleAt[key] = Date.now();
+      });
+  }
+}
+
+/**
+ * デコード済み MP3 を1枚鳴らす。鳴らせたら true。
+ * バッファがまだ無いときは読み込みを促して false を返す（呼び出し側がシンセ音へ落ちる）。
+ */
+function playSample(key, { delay = 0, gain = 0.35, rate = 1, bus: target = 'sfxBus' } = {}) {
+  if (!state.settings.sound) return false;
+  const ctx = state.ctx;
+  const buffer = state.samples[key];
+  if (!ctx || !buffer || !ready()) {
+    /* バイトはあるのにバッファが無い（Context を作り直した直後）→ 再デコードだけ試す。
+       取りに行くのは unlockAudio() の役目（ジェスチャーの前に通信しない）。 */
+    if (ctx && !buffer && state.sampleState[key] === 'bytes') decodeSample(key);
+    return false;
+  }
+  const out = state[target];
+  if (!out) return false;
+  try {
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    if (src.playbackRate) src.playbackRate.value = Math.max(0.25, Math.min(4, rate));
+    const amp = ctx.createGain();
+    const start = ctx.currentTime + Math.max(0, delay);
+    const level = Math.max(0.0002, gain);
+    const duration = Number(buffer.duration) > 0 ? Number(buffer.duration) / rate : 1.2;
+    const end = start + duration;
+    amp.gain.setValueAtTime(0.0001, start);
+    amp.gain.linearRampToValueAtTime(level, start + Math.min(0.02, duration * 0.2));
+    /* 終わりは軽く絞って、ぶつ切りの「プツ」を避ける */
+    amp.gain.setValueAtTime(level, Math.max(start + 0.03, end - Math.min(0.09, duration * 0.25)));
+    amp.gain.linearRampToValueAtTime(0.0001, end);
+    src.connect(amp).connect(out);
+    src.start(start);
+    src.stop(end + 0.02);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 何枚鳴らせたかを数える（1枚でも鳴れば mp3、0枚ならシンセ） */
+function playSamples(layers) {
+  let played = 0;
+  for (const layer of layers) {
+    if (playSample(layer.key, layer)) played += 1;
+  }
+  return played;
 }
 
 /* ------------------------------------------------------------------ *\
@@ -410,11 +588,80 @@ export function gloveClear() {
   noise({ dur: 0.36, gain: 0.06, low: 1400, high: 6800, q: 0.4, delay: 0.1 });
 }
 
+/* ------------------------------------------------------------------ *\
+ * Build 8: 本物のスタジアム音を重ねる判定演出
+ *
+ * MP3 が1枚でも鳴ればそれを主役にし、1枚も鳴らない（読み込み前・失敗・
+ * 非対応環境）ときは従来のシンセ音（Build 6 のスタジアムホーン／ファンファーレ／
+ * どよめき／落胆）へそのまま落ちる。どちらの道でも途中で throw しない。
+ * ------------------------------------------------------------------ */
+
+/** ゴール: スタジアム大歓声 ＋ エアーホーン ＋ 勝利ファンファーレ ＋ 男衆の「イエーイ！」 */
+function goalShowcase() {
+  const played = playSamples([
+    { key: 'cheer', gain: 0.55, bus: 'crowdBus' },
+    { key: 'horn', gain: 0.46, delay: 0.04 },
+    { key: 'fanfare', gain: 0.4, delay: 0.16 },
+    { key: 'yeah', gain: 0.26, delay: 0.36, bus: 'crowdBus' },
+  ]);
+  if (!played) {
+    stadiumHorn();
+    victoryFanfare();
+    return 'synth';
+  }
+  return 'mp3';
+}
+
+/** セーブ: 「オーッ！」＋小さめの「わぁーーっ」＋グローブのクリア音 */
+function saveShowcase() {
+  const played = playSamples([
+    { key: 'oo', gain: 0.5, bus: 'crowdBus' },
+    { key: 'uwaa', gain: 0.16, delay: 0.1, bus: 'crowdBus' },
+  ]);
+  gloveClear();
+  if (!played) crowdOoh();
+  return played ? 'mp3' : 'synth';
+}
+
+/** ミス: 従来の落胆＋スタジアムの反応を少しだけ（低くゆっくり＝ため息寄り） */
+function missShowcase() {
+  crowdAww();
+  const added = playSample('oo', { gain: 0.18, rate: 0.78, bus: 'crowdBus' });
+  return added ? 'mixed' : 'synth';
+}
+
+/**
+ * 優勝・決着の演出。勝ちはファンファーレ＋大歓声＋「イエーイ！」で華やかに、
+ * 負け・引き分けはスタジアムの反応を小さく添える。
+ */
+export function champion({ win = true } = {}) {
+  if (!state.settings.sound) return null;
+  let played = 0;
+  if (win) {
+    played = playSamples([
+      { key: 'fanfare', gain: 0.48, delay: 0.05 },
+      { key: 'cheer', gain: 0.5, bus: 'crowdBus' },
+      { key: 'yeah', gain: 0.26, delay: 0.32, bus: 'crowdBus' },
+    ]);
+    if (!played) {
+      victoryFanfare({ delay: 0.05 });
+      crowdOoh({ amount: 1.1 });
+    }
+  } else {
+    played = playSample('oo', { gain: 0.22, rate: 0.86, bus: 'crowdBus' }) ? 1 : 0;
+    crowdAww({ amount: 0.8 });
+  }
+  const kind = win ? 'champion' : 'defeat';
+  state.voices[kind] = (state.voices[kind] || 0) + 1;
+  state.lastVoice = { kind, mode: 'showcase', source: played ? 'mp3' : 'synth', at: Date.now() };
+  return { ...state.lastVoice };
+}
+
 /** 判定ごとの演出音の組み合わせ */
 const SHOWCASE = {
-  goal: () => { stadiumHorn(); victoryFanfare(); },
-  save: () => { gloveClear(); crowdOoh(); },
-  miss: () => { crowdAww(); },
+  goal: goalShowcase,
+  save: saveShowcase,
+  miss: missShowcase,
 };
 
 /**
@@ -426,9 +673,9 @@ export function voice(kind) {
   if (!state.settings.sound) return null;
   const play = SHOWCASE[kind];
   if (!play) return null;
-  play();
+  const source = play();
   state.voices[kind] = (state.voices[kind] || 0) + 1;
-  state.lastVoice = { kind, mode: 'showcase', at: Date.now() };
+  state.lastVoice = { kind, mode: 'showcase', source: source || 'synth', at: Date.now() };
   return { kind, mode: 'showcase' };
 }
 
@@ -784,5 +1031,10 @@ export function audioState() {
     needsGestureRecovery: Boolean(state.needsGestureRecovery),
     silent: Boolean(state.silent),
     recoveries: state.recoveries,
+    /* Build 8: 本物のスタジアム音（MP3）の状態。'ready' だけが再生できる */
+    samples: Object.fromEntries(
+      Object.keys(SFX_FILES).map((key) => [key, state.samples[key] ? 'ready' : (state.sampleState[key] || 'idle')]),
+    ),
+    sampleSource: state.lastVoice?.source ?? null,
   };
 }
