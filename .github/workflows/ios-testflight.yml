@@ -1,6 +1,6 @@
-# SHOOTOUT 4 iOS TestFlight Build 2
+# SHOOTOUT 4 iOS TestFlight Build 9
 # ============================================================
-# SHOOTOUT 4 v1.0.0（Build 2）を TestFlight へ配信するワークフロー。
+# SHOOTOUT 4 v1.0.0（Build 9）を TestFlight へ配信するワークフロー。
 # トモアキさんが Safari で GitHub に貼り付ける用（DOROKEI / JANKeN PoN と同じ手順）。
 #
 # 置き場所（新リポジトリ）:
@@ -18,7 +18,7 @@
 # ★ ビルド番号はこのファイルに書きません。
 #   ios/App/App.xcodeproj/project.pbxproj の CURRENT_PROJECT_VERSION を
 #   そのまま読み取って使います（MARKETING_VERSION も同じ）。
-#   Build 2 にするときは pbxproj の番号を 2 に上げるだけです。
+#   Build 9 にするときは pbxproj の番号を 9 に上げるだけです。
 #
 # 必要な Secrets（既存リポジトリと同じ値）:
 #   APPLE_TEAM_ID                   … 例 TGBNH8WJV6
@@ -92,7 +92,7 @@ jobs:
       - name: Run the SHOOTOUT 4 unit tests
         run: npm test
 
-      - name: Guard the game rules (7秒・4択・5本・サドンデス・能力差ゼロ)
+      - name: Guard the game rules (8秒・4択・5本・サドンデス・能力差ゼロ)
         run: |
           set -euo pipefail
           for file in src/main.js src/i18n.js src/audio.js src/storage.js src/platform/iap.js \
@@ -103,7 +103,7 @@ jobs:
           grep -q "DIRECTIONS = Object.freeze(\['TL', 'TR', 'BL', 'BR'\])" src/core/rules.js
           grep -q 'KICKERS = 5' src/core/rules.js
           grep -q 'export function decidedWinner' src/core/rules.js
-          grep -q "roundSeconds: 7" src/config.js
+          grep -q "roundSeconds: 8" src/config.js
           grep -q 'confirmKick' src/main.js
           grep -q 'id="timer-fill"' src/ui/match.js
           grep -q 'data-dir="TL"' src/ui/match.js
