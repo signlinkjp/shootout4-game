@@ -23,7 +23,7 @@ python3 -m http.server 4173
 ## テスト
 
 ```bash
-npm test                                  # 単体テスト 135件（node --test）
+npm test                                  # 単体テスト 136件（node --test）
 node tools/verify-ios-project.mjs         # iOS プロジェクトの契約チェック 44項目
 bash tools/preflight-local.sh             # CI の preflight と同じガード
 node tools/shots-prod.mjs                 # 実ブラウザ E2E 102項目＋スクリーンショット

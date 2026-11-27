@@ -542,9 +542,12 @@ export class ShootoutSession {
     return this.pick(round, MISS, { timeout: true });
   }
 
+  /** スタンプ・定型文を送る（許可リストの id だけ・本文は送らない） */
   sendStamp(id) {
     if (!this.matchName) return false;
-    return this.client.broadcast(this.matchName, 'stamp', { from: this.client.clientId, id });
+    const value = String(id || '');
+    if (!EMOTE_WIRE_IDS.includes(value)) return false;
+    return this.client.broadcast(this.matchName, 'stamp', { from: this.client.clientId, id: value });
   }
 
   startRanking({ scope = 'domestic', row = null } = {}) {

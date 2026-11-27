@@ -294,6 +294,18 @@ test('スタンプ: 自由入力は送れない（許可リストとサイズ・
   assert.equal(validateStamp({ from: 'a', id: 'nice', text: 'x'.repeat(600) }, { self: 'me', allowed, now }).ok, false);
 });
 
+test('スタンプ: 送る側も許可リストの id 以外は送らない', () => {
+  const sent = [];
+  const session = new ShootoutSession({ client: captureClient('me', sent) });
+  session.channel = 'shootout-match:me-other';
+  session.matchName = session.channel;
+  assert.equal(session.sendStamp('taunt_left'), true);
+  assert.equal(session.sendStamp('自由入力のテキスト'), false);
+  assert.equal(session.sendStamp(''), false);
+  assert.deepEqual(sent.map((item) => item.event), ['stamp']);
+  assert.equal(sent[0].payload.id, 'taunt_left');
+});
+
 test('スタンプ: CPU はときどき、その場に合ったリアクションを返す', () => {
   const always = cpuEmoteFor('conceded', { random: () => 0, chance: 1 });
   assert.ok(EMOTE_IDS.includes(always), always);
