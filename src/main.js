@@ -88,6 +88,9 @@ let match = null;
 let session = null;
 let client = null;
 let online = { mode: 'menu', scope: 'domestic', code: '', status: '', opponent: null, searching: false, room: '', rankTab: 'total' };
+/* Build 11: 組んだ（paired）から試合開始までの予約。相手が抜けたら必ず取り消す */
+let pendingStart = null;
+let pendingRoom = '';
 let rankRows = [];
 let rankStatus = '';
 let proStatus = '';
@@ -907,6 +910,12 @@ function updateBoard() {
  * 通信対戦
  * ------------------------------------------------------------------ */
 
+function clearPendingStart() {
+  if (pendingStart) clearTimeout(pendingStart);
+  pendingStart = null;
+  pendingRoom = '';
+}
+
 function ensureSession() {
   if (session) return session;
   const config = onlineConfig();
@@ -942,8 +951,16 @@ function handleOnlineEvent(event) {
       online.searching = false;
       online.status = '';
       if (screen === 'online') render();
-      setTimeout(() => {
-        if (online.opponent && screen === 'online') startMatch({ onlineMatch: true });
+      /* Build 11: この試合の部屋名を覚えておき、別の試合にすり替わっていないか見る */
+      clearPendingStart();
+      pendingRoom = event.room || (session && session.matchName) || '';
+      pendingStart = setTimeout(() => {
+        pendingStart = null;
+        const room = pendingRoom;
+        pendingRoom = '';
+        if (!online.opponent || screen !== 'online') return;
+        if (session && room && session.matchName !== room) return;
+        startMatch({ onlineMatch: true });
       }, 1100);
       break;
     }
@@ -969,8 +986,10 @@ function handleOnlineEvent(event) {
     case 'stamp':
       showEmote(event.id, { mine: false });
       break;
-    case 'opponent-left':
+    case 'opponent-left': {
       toast(t('opponentLeft'));
+      const wasPending = Boolean(pendingStart) || online.searching;
+      clearPendingStart();
       if (match && match.online) {
         setTimeout(() => {
           if (match) {
@@ -983,8 +1002,20 @@ function handleOnlineEvent(event) {
             go('online');
           }
         }, 1400);
+        break;
+      }
+      /*
+       * Build 11: 組んだ直後（試合開始前の1100ms）に相手が抜けた場合。
+       * ここで消さないと、死んだ試合へ遷移してフリーズしたように見えた。
+       */
+      if (wasPending || screen === 'online') {
+        online.opponent = null;
+        online.searching = false;
+        online.status = t('opponentLeft');
+        if (screen === 'online') render();
       }
       break;
+    }
     case 'timeout':
       online.status = t('searching');
       if (screen === 'online') {
@@ -1019,6 +1050,7 @@ function openQuick() {
     return;
   }
   ensureSession();
+  clearPendingStart();
   session.quickMatch({ scope: online.scope, country: onlineProfile().countryCode, profile: onlineProfile() });
   online.searching = true;
   online.opponent = null;
@@ -1041,6 +1073,7 @@ function createRoom() {
   const code = randomCode();
   online.code = code;
   ensureSession();
+  clearPendingStart();
   session.joinRoom({ code, profile: onlineProfile() });
   online.searching = true;
   online.opponent = null;
@@ -1067,6 +1100,7 @@ function joinRoom(codeInput) {
   }
   online.code = code;
   ensureSession();
+  clearPendingStart();
   session.joinRoom({ code, profile: onlineProfile() });
   online.searching = true;
   online.opponent = null;
@@ -1075,6 +1109,7 @@ function joinRoom(codeInput) {
 }
 
 function cancelSearch() {
+  clearPendingStart();
   if (session) session.leave({ bye: false });
   online.searching = false;
   online.opponent = null;
@@ -1083,6 +1118,7 @@ function cancelSearch() {
 }
 
 function leaveOnlineMatch() {
+  clearPendingStart();
   if (session) session.leave();
   stopRound();
   disposeStadium();

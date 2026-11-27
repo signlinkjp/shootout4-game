@@ -5,7 +5,7 @@ import {
   RealtimeClient, ShootoutSession, RankingNet, realtimeUrl, presenceMembers,
   quickChannel, roomChannel, matchChannel, rankChannel, normalizeCode, randomCode,
   onlineConfig, onlineConfigured, fallbackDirection, mergeRows, readRankCache,
-  writeRankCache, rankTable, ONLINE_TURN_MS,
+  writeRankCache, rankTable, ONLINE_TURN_MS, sessionTag,
 } from '../src/net/online.js';
 
 /* ------------------------------------------------------------------ *\
@@ -434,7 +434,6 @@ function manualClient(id) {
     subscribe(name, value) { handlers.set(name, value); return name; },
     unsubscribe(name) { unsubscribed.push(name); handlers.delete(name); },
     track: () => true,
-    retrack: () => true,
     joined: () => false,
     broadcast: (name, event, payload) => { sent.push({ name, event, payload }); return true; },
     fireStatus(name, status) { handlers.get(name)?.onStatus?.(status); },
@@ -766,4 +765,256 @@ test('Build 10: クイックマッチをやり直しても、両方が合流し�
   assert.equal(eventsB.filter((event) => event.type === 'kick').length, 2);
   sa.leave({ bye: false });
   sb.leave({ bye: false });
+});
+
+/* ------------------------------------------------------------------ *\
+ * Build 11: presence の連射（レート制限）廃止・試合チャンネルの一意化・
+ *           phx_close からの自動復帰
+ * ------------------------------------------------------------------ */
+
+/** ブローカーが受け取った presence 電文をトピックごとに数える */
+function countPresence(broker) {
+  const counts = new Map();
+  const original = broker.receive.bind(broker);
+  broker.receive = (socket, message) => {
+    if (message && message.event === 'presence' && typeof message.topic === 'string') {
+      const topic = message.topic.replace(/^realtime:/, '');
+      counts.set(topic, (counts.get(topic) || 0) + 1);
+    }
+    original(socket, message);
+  };
+  return counts;
+}
+
+test('Build 11: 試合チャンネル名は2人のIDと試合ごとの目印から作る', () => {
+  assert.equal(sessionTag(() => 0), 'AAAA');
+  assert.equal(sessionTag(() => 0.999999).length, 4);
+  const name = matchChannel('bbb', 'aaa', 'XY12', 'Z345');
+  assert.equal(name, 'shootout-match:aaa~Z345-bbb~XY12', 'ソート順に組み合わせる');
+  assert.equal(matchChannel('bbb', 'aaa'), 'shootout-match:aaa-bbb', '目印が無くても壊れない');
+});
+
+test('Build 11: 試合中に presence（在室）を送り直さない（レート制限で切られない）', async () => {
+  const broker = new Broker();
+  const counts = countPresence(broker);
+  const a = makeClient(broker, 'aaa');
+  const b = makeClient(broker, 'bbb');
+  const eventsA = [];
+  const sa = makeSession(a, eventsA, { leaveGraceMs: 500 });
+  const sb = makeSession(b, [], { leaveGraceMs: 500 });
+  sa.quickMatch({ scope: 'domestic', country: 'JP', profile: { nickname: 'A' } });
+  sb.quickMatch({ scope: 'domestic', country: 'JP', profile: { nickname: 'B' } });
+  await flush(60);
+  assert.ok(sa.matchName && sa.matchName === sb.matchName);
+  const waiting = WAITING;
+  const match = sa.matchName;
+  assert.equal(counts.get(waiting), 2, '待機部屋の在室は1人1回だけ');
+  assert.equal(counts.get(match), 2, '試合部屋の在室も1人1回だけ');
+
+  /* Build 10 は3秒ごとに retrack していた（＝ここで4件以上に増えていた） */
+  await flush(3400);
+  assert.equal(counts.get(match), 2, '3秒を過ぎても在室を送り直さない');
+  assert.equal(sa.opponentSeen, true);
+  assert.equal(eventsA.filter((event) => event.type === 'opponent-left').length, 0);
+
+  /* 1本目は普通に蹴れる */
+  sa.pick(0, 'TL');
+  sb.pick(0, 'BR');
+  await flush(40);
+  assert.equal(eventsA.filter((event) => event.type === 'kick').length, 1);
+  assert.equal(typeof sa.startPresenceBeat, 'undefined', '在室の連射は廃止した');
+  assert.equal(typeof sa.retrackMatch, 'undefined');
+  assert.equal(typeof a.retrack, 'undefined', 'realtime から retrack も消した');
+  sa.leave({ bye: false });
+  sb.leave({ bye: false });
+});
+
+test('Build 11: 続けて2試合しても、試合チャンネルは毎回べつ（前の残像が届かない）', async () => {
+  const broker = new Broker();
+  const a = makeClient(broker, 'aaa');
+  const b = makeClient(broker, 'bbb');
+  const eventsA = [];
+  const eventsB = [];
+  const sa = makeSession(a, eventsA, { leaveGraceMs: 150 });
+  const sb = makeSession(b, eventsB, { leaveGraceMs: 150 });
+  sa.quickMatch({ scope: 'domestic', country: 'JP', profile: { nickname: 'A' } });
+  sb.quickMatch({ scope: 'domestic', country: 'JP', profile: { nickname: 'B' } });
+  await flush(60);
+  const first = sa.matchName;
+  assert.match(first, /^shootout-match:aaa~[^-]+-bbb~[^-]+$/);
+  assert.ok(first.includes(sa.sessionTag) && first.includes(sb.sessionTag));
+  sa.pick(0, 'TL');
+  sb.pick(0, 'BR');
+  await flush(40);
+
+  sa.leave({ bye: false });
+  sb.leave({ bye: false });
+  await flush(30);
+  sa.quickMatch({ scope: 'domestic', country: 'JP', profile: { nickname: 'A' } });
+  sb.quickMatch({ scope: 'domestic', country: 'JP', profile: { nickname: 'B' } });
+  await flush(60);
+  assert.ok(sa.matchName, '2試合目も組める');
+  assert.equal(sa.matchName, sb.matchName);
+  assert.notEqual(sa.matchName, first, '前の試合と同じ部屋名を使い回さない');
+  assert.ok(!first.includes(sa.sessionTag), '目印は試合ごとに作り直す');
+
+  await flush(300);
+  assert.equal(eventsA.filter((event) => event.type === 'opponent-left').length, 0);
+  assert.equal(eventsB.filter((event) => event.type === 'opponent-left').length, 0);
+  sa.pick(0, 'TL');
+  sb.pick(0, 'BR');
+  await flush(40);
+  assert.equal(eventsA.filter((event) => event.type === 'kick').length, 2);
+  assert.equal(eventsB.filter((event) => event.type === 'kick').length, 2);
+  sa.leave({ bye: false });
+  sb.leave({ bye: false });
+});
+
+test('Build 11: 相手の目印が届かなくても、こちらの目印だけで一意な部屋名を作る', () => {
+  const client = manualClient('aaa');
+  const session = manualSession({ client });
+  session.mode = 'quick';
+  session.channel = WAITING;
+  session.sessionTag = 'Z9Z9';
+  session.openChannel(session.channel, session.meta({ mode: 'quick', tag: 'Z9Z9' }));
+  session.handlePresence(WAITING, [{ key: 'aaa' }, { key: 'zzz' }]);
+  assert.equal(session.matchName, 'shootout-match:aaa~Z9Z9-zzz');
+  const pair = client.sent.find((item) => item.event === 'pair');
+  assert.equal(pair.payload.room, session.matchName, 'この部屋へ来るよう相手に伝える');
+});
+
+test('Build 11: 先に組む側でないほうは、pair で渡された部屋名をそのまま使う', () => {
+  const client = manualClient('zzz');
+  const session = manualSession({ client });
+  session.mode = 'quick';
+  session.channel = WAITING;
+  session.sessionTag = 'B1B1';
+  session.openChannel(session.channel, session.meta({ mode: 'quick', tag: 'B1B1' }));
+  session.handlePresence(WAITING, [{ key: 'aaa', tag: 'A1A1' }, { key: 'zzz', tag: 'B1B1' }]);
+  assert.equal(session.matchName, null, '自分では部屋名を作らない（すれ違わない）');
+  assert.equal(session.waitingChannel, WAITING, '待機部屋には残る');
+
+  session.handleBroadcast(WAITING, 'pair', {
+    from: 'aaa',
+    to: 'zzz',
+    room: 'shootout-match:aaa~A1A1-zzz~B1B1',
+  });
+  assert.equal(session.matchName, 'shootout-match:aaa~A1A1-zzz~B1B1');
+  assert.equal(client.sent.filter((item) => item.event === 'pair').length, 0, 'pair を決めるのは先に組む側だけ');
+  session.reset();
+});
+
+test('Build 11: 部屋名が届かないときは2.5秒ごとに pair を頼み直し、最後は待機部屋を離れる', () => {
+  const clock = fakeClock();
+  const client = manualClient('zzz');
+  const session = new ShootoutSession({ client, schedule: clock.schedule, clear: clock.clear, waitLingerMs: 2500 });
+  session.mode = 'quick';
+  session.channel = WAITING;
+  session.sessionTag = 'B1B1';
+  session.openChannel(session.channel, session.meta({ mode: 'quick', tag: 'B1B1' }));
+  session.handlePresence(WAITING, [{ key: 'aaa', tag: 'A1A1' }, { key: 'zzz', tag: 'B1B1' }]);
+  assert.equal(session.matchName, null);
+  assert.equal(client.unsubscribed.length, 0, '相手を見た瞬間には待機部屋を切らない');
+
+  clock.runMs(2500);
+  const asks = () => client.sent.filter((item) => item.event === 'pair' && item.payload.ask);
+  assert.equal(asks().length, 1, '1回目は pair を頼む');
+  assert.equal(asks()[0].payload.to, 'aaa');
+  assert.equal(client.unsubscribed.length, 0);
+  clock.runMs(2500);
+  assert.equal(asks().length, 2, '2回目も頼む');
+  clock.runMs(2500);
+  assert.deepEqual(client.unsubscribed, [WAITING], '3回で待機部屋を離れる（安全弁）');
+});
+
+test('Build 11: 部屋名を頼まれたら、もう一度だけ部屋名を伝える', () => {
+  const posted = [];
+  const handlers = new Map();
+  const client = {
+    clientId: 'aaa',
+    subscribe: (name, value) => { handlers.set(name, value); return name; },
+    unsubscribe: () => {},
+    track: () => true,
+    joined: () => false,
+    broadcast: (name, event, payload) => { posted.push({ name, event, payload }); return true; },
+  };
+  const session = new ShootoutSession({ client });
+  session.mode = 'quick';
+  session.channel = WAITING;
+  session.sessionTag = 'A1A1';
+  session.openChannel(session.channel, session.meta({ mode: 'quick', tag: 'A1A1' }));
+  session.handlePresence(WAITING, [{ key: 'aaa', tag: 'A1A1' }, { key: 'zzz', tag: 'B1B1' }]);
+  const room = session.matchName;
+  assert.ok(room);
+
+  handlers.get(WAITING).onBroadcast('pair', { from: 'zzz', to: 'aaa', ask: true });
+  const answers = posted.filter((item) => item.name === WAITING && item.event === 'pair' && item.payload.room === room);
+  assert.equal(answers.length >= 2, true, '最初の合図か、頼まれての返事のどちらかで部屋名が届く');
+  assert.equal(answers.at(-1).payload.to, 'zzz');
+  session.reset();
+});
+
+test('Build 11: phx_close でサーバーに切られたチャンネルは、少し待って自動で入り直す', async () => {
+  const broker = new Broker();
+  const a = makeClient(broker, 'aaa');
+  const statuses = [];
+  const members = [];
+  let tracked = 0;
+  const originalReceive = broker.receive.bind(broker);
+  broker.receive = (socket, message) => {
+    if (message && message.event === 'presence') tracked += 1;
+    originalReceive(socket, message);
+  };
+  a.subscribe('shootout-test:room', {
+    /* online.js の openChannel と同じく、入れたら在室（presence）を1回だけ送る */
+    onStatus: (status) => {
+      statuses.push(status);
+      if (status === 'joined') a.track('shootout-test:room', { role: 'test' });
+    },
+    onPresence: ({ members: list }) => members.push(list.length),
+    onBroadcast: () => {},
+  });
+  await flush(30);
+  assert.equal(a.joined('shootout-test:room'), true);
+  assert.equal(tracked, 1, '入れたら在室を1回送る');
+
+  /* サーバーからの強制切断（レート制限などで起きる phx_close） */
+  a.socket.onmessage({
+    data: JSON.stringify({ topic: 'realtime:shootout-test:room', event: 'phx_close', payload: {} }),
+  });
+  assert.equal(a.joined('shootout-test:room'), false, '閉じたチャンネルは joined にしない');
+  assert.ok(statuses.includes('closed'));
+
+  await flush(1200);
+  assert.equal(a.joined('shootout-test:room'), true, '自動で入り直した');
+  assert.equal(tracked, 2, '入り直したら在室を1回だけ送り直す');
+  a.close();
+  await flush(10);
+});
+
+test('Build 11: phx_close を何度も繰り返しても、入り直しは間隔を空けて諦める', async () => {
+  const broker = new Broker();
+  const a = makeClient(broker, 'aaa');
+  let joins = 0;
+  const originalReceive = broker.receive.bind(broker);
+  broker.receive = (socket, message) => {
+    if (message && message.event === 'phx_join') joins += 1;
+    originalReceive(socket, message);
+  };
+  const errors = [];
+  a.subscribe('shootout-test:retry', { onStatus: (status) => errors.push(status) });
+  await flush(30);
+  const joinsAtStart = joins;
+  /* 9回続けて切る（REJOIN_ATTEMPTS は8回） */
+  for (let i = 0; i < 9; i += 1) {
+    a.socket.onmessage({
+      data: JSON.stringify({ topic: 'realtime:shootout-test:retry', event: 'phx_close', payload: {} }),
+    });
+    await flush(20);
+  }
+  await flush(3000);
+  assert.ok(joins - joinsAtStart <= 8, `入り直しは最大8回（実際 ${joins - joinsAtStart}）`);
+  assert.equal(errors.includes('error'), true, '諦めたら error を出す（黙って死なない）');
+  a.close();
+  await flush(10);
 });

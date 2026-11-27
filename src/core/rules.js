@@ -133,12 +133,18 @@ export function decidedWinner(state) {
 export function resolveKick(state, { shot, save, timeout = false, stuck = false } = {}) {
   if (state.winner) throw new Error('match finished');
   if (!isPick(shot)) throw new TypeError('invalid shot');
-  if (!stuck && !isDirection(save)) throw new TypeError('invalid save');
+  /*
+   * Build 11: 枠外（MISS）のときはキーパーの手が存在しない（save = null）。
+   * ここで save を必須にしていると、通信対戦のミスキックで TypeError が上がり、
+   * 呼び出し側（emit の try/catch）に飲まれて「その1本が解決しないまま
+   * フリーズする」原因になっていた。
+   */
+  const miss = shot === MISS;
+  if (!stuck && !miss && !isDirection(save)) throw new TypeError('invalid save');
 
   const side = state.turn;
   const keeper = otherSide(side);
   /* 枠外（時間切れ）は必ず外れる。キーパーが動けなかった場合（stuck）は必ず入る。 */
-  const miss = shot === MISS;
   const goal = !miss && (stuck ? true : shot !== save);
   const event = {
     index: state.history.length,

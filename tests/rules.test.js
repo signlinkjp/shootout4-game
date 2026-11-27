@@ -189,3 +189,20 @@ test('勝率の計算', () => {
   assert.equal(winRate({ wins: 3, losses: 1 }), 75);
   assert.equal(winRate({ wins: 0, losses: 0 }), 0);
 });
+
+/* ------------------------------------------------------------------ *\
+ * Build 11: 通信対戦のミスキック（キーパーの手が無い＝save: null）でも1本が解決する
+ * ------------------------------------------------------------------ */
+
+test('Build 11: ミスキックは save = null でも解決し、方向が要る場面では従来どおり拒否する', () => {
+  const next = resolveKick(newMatch(), { shot: MISS, save: null, timeout: true });
+  const event = next.history[0];
+  assert.equal(event.miss, true);
+  assert.equal(event.save, null);
+  assert.equal(next.history.length, 1, '1本ぶん消費して進む（フリーズしない）');
+  assert.equal(next.turn, 'opp');
+
+  /* キーパーが動ける場面（方向が来るはず）で null は従来どおり拒否する */
+  assert.throws(() => resolveKick(newMatch(), { shot: 'TL', save: null }), /invalid save/);
+  assert.throws(() => resolveKick(newMatch(), { shot: 'TL', save: 'CENTER' }), /invalid save/);
+});

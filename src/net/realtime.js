@@ -12,6 +12,10 @@ const MAX_RETRY_MS = 15000;
 const CONNECT_TIMEOUT_MS = 5000;
 const JOIN_TIMEOUT_MS = 7000;
 const WEDGE_DIALS = 3;
+/** サーバーから phx_close で切られたチャンネルを join し直す間隔（Build 11） */
+const REJOIN_MIN_MS = 400;
+const REJOIN_MAX_MS = 8000;
+const REJOIN_ATTEMPTS = 8;
 
 export function realtimeUrl(baseUrl, anonKey) {
   const url = new URL(baseUrl);
@@ -70,6 +74,8 @@ export class RealtimeClient {
     this.wedged = false;
     this.sent = 0;
     this.received = 0;
+    /* Build 11: phx_close されたチャンネルの join し直し（名前 → タイマーID） */
+    this.rejoinIds = new Map();
   }
 
   /** 画面に出す1行（すべて実際に起きたこと） */
@@ -123,7 +129,9 @@ export class RealtimeClient {
       this.lastError = '';
       this.setStatus('open');
       this.startHeartbeat();
-      for (const name of this.topics.keys()) {
+      /* 開いた時点のトピックへ入り直す。onopen の途中で subscribe された
+         トピックを二重に join しないよう、一覧を先に写す（Build 11） */
+      for (const name of [...this.topics.keys()]) {
         const entry = this.topics.get(name);
         if (entry) entry.joinRetried = false;
         this.sendJoin(name);
@@ -275,9 +283,10 @@ export class RealtimeClient {
     if (this.topics.has(name)) {
       const existing = this.topics.get(name);
       existing.handlers = handlers;
+      existing.rejoinTries = 0;
       return name;
     }
-    this.topics.set(name, { handlers, joined: false, joinRef: String((this.ref += 1)), presence: {} });
+    this.topics.set(name, { handlers, joined: false, joinRef: String((this.ref += 1)), presence: {}, rejoinTries: 0 });
     if (this.socket && this.socket.readyState === 1) this.sendJoin(name);
     else this.connect();
     return name;
@@ -334,23 +343,51 @@ export class RealtimeClient {
     return sent;
   }
 
-  /**
-   * 同じ内容でも presence を送り直す（Build 10）。
-   * 前のセッションの phx_leave が遅れて届くと、自分や相手の在室が消えたまま
-   * になることがある。試合中にこれを繰り返して、消された在室を戻す。
-   */
-  retrack(name, meta) {
-    const entry = this.topics.get(name);
-    if (!entry) return false;
-    entry.tracked = null;
-    return this.track(name, meta);
-  }
-
   unsubscribe(name) {
     const entry = this.topics.get(name);
     if (!entry) return;
+    this.cancelRejoin(name);
     this.sendRaw({ topic: `realtime:${name}`, event: 'phx_leave', payload: {}, ref: String((this.ref += 1)) });
     this.topics.delete(name);
+  }
+
+  /**
+   * 予期しない phx_close（サーバーからの切断）を受けたチャンネルを join し直す（Build
+   * 11）。Build 10 までは status を閉じたまま黙って捨てていたため、試合中に通信が
+   * サイレント死してフリーズした。少し待ってから同じトピックへ入り直し、
+   * それでも閉じられ続けるときだけ error を出して諦める。
+   */
+  onTopicClosed(name, entry) {
+    if (this.closed || !this.topics.has(name)) return;
+    entry.rejoinTries = (entry.rejoinTries || 0) + 1;
+    if (entry.rejoinTries > REJOIN_ATTEMPTS) {
+      this.cancelRejoin(name);
+      entry.lastError = entry.lastError || 'rejoin-gave-up';
+      this.lastError = entry.lastError;
+      if (entry.handlers && entry.handlers.onStatus) entry.handlers.onStatus('error');
+      return;
+    }
+    this.scheduleRejoin(name, entry.rejoinTries);
+  }
+
+  scheduleRejoin(name, tries = 1) {
+    if (this.closed || !this.topics.has(name)) return;
+    if (this.rejoinIds.has(name)) return;
+    const step = Math.min(REJOIN_MAX_MS, REJOIN_MIN_MS * 2 ** (Math.max(1, tries) - 1));
+    const wait = Math.round(step * (0.8 + this.random() * 0.4));
+    const id = this.schedule(() => {
+      this.rejoinIds.delete(name);
+      if (this.closed || !this.topics.has(name)) return;
+      if (this.socket && this.socket.readyState === 1) this.sendJoin(name);
+      else this.connect();
+    }, wait);
+    this.rejoinIds.set(name, id);
+  }
+
+  cancelRejoin(name) {
+    const id = this.rejoinIds.get(name);
+    if (id) this.clear(id);
+    this.rejoinIds.delete(name);
   }
 
   joined(name) {
@@ -386,6 +423,7 @@ export class RealtimeClient {
       if (message.ref == null || String(message.ref) !== entry.joinRef) return;
       const ok = message.payload && message.payload.status === 'ok';
       const wasJoined = entry.joined;
+      if (ok) entry.rejoinTries = 0;
       entry.joined = ok;
       if (ok && !wasJoined && entry.handlers.onStatus) entry.handlers.onStatus('joined');
       if (!ok) {
@@ -428,8 +466,15 @@ export class RealtimeClient {
       return;
     }
     if (message.event === 'phx_error' || message.event === 'phx_close') {
+      /*
+       * Build 11: 現役のトピック（unsubscribe 済みなら topics から消えている）が
+       * サーバー側で閉じられた。在室を信じずに捨て、少し待って入り直す。
+       * 入り直せば subscribed の通知で在室（presence）を1回だけ送り直す。
+       */
       entry.joined = false;
+      entry.presence = {};
       if (entry.handlers.onStatus) entry.handlers.onStatus('closed');
+      this.onTopicClosed(name, entry);
     }
   }
 
@@ -438,6 +483,8 @@ export class RealtimeClient {
     this.stopHeartbeat();
     if (this.retryId) this.clear(this.retryId);
     this.retryId = null;
+    for (const id of this.rejoinIds.values()) this.clear(id);
+    this.rejoinIds.clear();
     this.topics.clear();
     if (this.socket && this.socket.readyState <= 1) this.socket.close();
     this.socket = null;

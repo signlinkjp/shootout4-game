@@ -5,7 +5,7 @@
  *
  *   クイックマッチ  shootout-quick:{world|国コード}:{domestic|world}
  *   フレンド対戦    shootout-room:{コード}
- *   対戦            shootout-match:{id1-id2}（2人のIDから決まる名前）
+ *   対戦            shootout-match:{id~tag-id~tag}（2人のIDと試合ごとの目印から決まる名前）
  *   ランキング      shootout-rank:{scope}
  *
  * 1本ごとに、蹴る側は「狙い」、止める側は「飛ぶ方向」を1つ送る。
@@ -58,8 +58,18 @@ export function roomChannel(code) {
   return `shootout-room:${normalizeCode(code)}`;
 }
 
-export function matchChannel(keyA, keyB) {
-  return `shootout-match:${[String(keyA), String(keyB)].sort().join('-')}`;
+export function matchChannel(keyA, keyB, tagA = '', tagB = '') {
+  /*
+   * Build 11: 試合ごとの目印（tag）まで名前に入れる。名前が毎試合変われば、
+   * 前のセッションの phx_leave（在室の leaves）が新しい試合の部屋に届くことは
+   * 物理的に起きない。tag が片方にしか無いときは、あるほうだけで一意にする。
+   */
+  const sides = [
+    [String(keyA), String(tagA || '')],
+    [String(keyB), String(tagB || '')],
+  ].sort((one, two) => (one[0] < two[0] ? -1 : one[0] > two[0] ? 1 : 0));
+  const label = sides.map(([key, tag]) => (tag ? `${key}~${tag}` : key)).join('-');
+  return `shootout-match:${label}`;
 }
 
 export function rankChannel({ scope = 'domestic' } = {}) {
@@ -84,9 +94,12 @@ export function randomCode(random = Math.random) {
   return out;
 }
 
-/** 試合ごとの目印（Build 10: 前のセッションの在室と区別する） */
-function randomToken(random = Math.random) {
-  return `m${Math.floor(random() * 1e9).toString(36)}${Math.floor(random() * 1e9).toString(36)}`;
+/** 試合ごとの目印（Build 11: 4文字の英数字。毎試合作り直す） */
+export function sessionTag(random = Math.random) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 4; i += 1) out += alphabet[Math.floor(random() * alphabet.length)];
+  return out;
 }
 
 export function fallbackDirection(round, seed = 0) {
@@ -97,18 +110,16 @@ export function fallbackDirection(round, seed = 0) {
 const JOIN_WAIT_MS = 8000;
 const MATCH_JOIN_WAIT_MS = 15000;
 const WAIT_LINGER_MS = 2500;
-/** 相手が試合部屋に現れるまで待機部屋に残る上限（Build 10: 2.5秒 × 3回） */
+/** 相手が試合部屋に現れるまで待機部屋に残る上限（2.5秒 × 3回） */
 const WAIT_LINGER_ROUNDS = 3;
 const REVEAL_GRACE_MS = 1400;
 /**
- * Build 10: 相手が在室から消えてから「退出」と決めるまでの猶予。
- * 同じ2人の試合チャンネル名は固定なので、やり直し直後は前のセッションの
- * `phx_leave`（presence の leaves）が遅れて届き、相手がまだ居るのに
- * 0.9秒ほどで退出と誤判定していた。この間に相手から何か届けば取り消す。
+ * 相手が在室から消えてから「退出」と決めるまでの猶予。
+ * 試合チャンネルは毎試合一意（Build 11）なので残像の leave は届かないが、
+ * 通信の瞬断で在室が一瞬消えることはある。短い猶予の間に相手から何か届けば
+ * 取り消す（猶予の間に presence を送り直すことはしない）。
  */
-const OPPONENT_LEFT_GRACE_MS = 4500;
-/** 試合中に自分の在室（presence）を言い直す間隔（残像の leave に消されても戻す） */
-const MATCH_PRESENCE_BEAT_MS = 3000;
+const OPPONENT_LEFT_GRACE_MS = 2500;
 /** 相手の hello に hello で返す最短の間隔（返事の連打を防ぐ） */
 const HELLO_REPLY_MS = 1500;
 export const ONLINE_TURN_MS = 8000;
@@ -126,7 +137,6 @@ export class ShootoutSession {
     random = Math.random,
     matchWaitMs = MATCH_JOIN_WAIT_MS,
     leaveGraceMs = OPPONENT_LEFT_GRACE_MS,
-    presenceBeatMs = MATCH_PRESENCE_BEAT_MS,
     helloReplyMs = HELLO_REPLY_MS,
     waitLingerMs = WAIT_LINGER_MS,
   } = {}) {
@@ -137,9 +147,8 @@ export class ShootoutSession {
     this.clear = (id) => clear(id);
     this.random = random;
     this.matchWaitMs = matchWaitMs;
-    /* Build 10: 退出判定の猶予・在室の言い直し・hello の返事（テストから短くできる） */
+    /* 退出判定の猶予・hello の返事（テストから短くできる） */
     this.leaveGraceMs = Number(leaveGraceMs) >= 0 ? Number(leaveGraceMs) : OPPONENT_LEFT_GRACE_MS;
-    this.presenceBeatMs = Number(presenceBeatMs) >= 0 ? Number(presenceBeatMs) : MATCH_PRESENCE_BEAT_MS;
     this.helloReplyMs = Number(helloReplyMs) >= 0 ? Number(helloReplyMs) : HELLO_REPLY_MS;
     this.waitLingerMs = Number(waitLingerMs) >= 0 ? Number(waitLingerMs) : WAIT_LINGER_MS;
     this.mode = null;
@@ -164,11 +173,12 @@ export class ShootoutSession {
     this.opponentSeen = false;
     /* 「相手が退出しました」を二重に出さない（Build 9） */
     this.leftNotified = false;
-    /* Build 10: 試合ごとの目印・在室の言い直し・退出判定の猶予・pair 再送のID管理 */
+    /* 試合ごとの目印・退出判定の猶予・pair 再送のID管理 */
+    this.sessionTag = '';
+    this.candidate = null;
     this.matchToken = '';
     this.pairTimers = [];
     this.leaveTimer = null;
-    this.presenceBeatTimer = null;
     this.waitLingerRounds = 0;
     this.lastHelloAt = 0;
     this.lastOpponentContactAt = 0;
@@ -224,6 +234,7 @@ export class ShootoutSession {
   quickMatch({ scope = 'domestic', country = 'JP', profile = {}, timeoutMs = MATCH_TIMEOUT_MS } = {}) {
     this.reset();
     this.mode = 'quick';
+    this.sessionTag = sessionTag(this.random);
     this.scope = scope === 'world' ? 'world' : 'domestic';
     if (this.scope === 'world' && !profile.pro) {
       this.mode = null;
@@ -239,6 +250,7 @@ export class ShootoutSession {
   joinRoom({ code, profile = {} } = {}) {
     this.reset();
     this.mode = 'room';
+    this.sessionTag = sessionTag(this.random);
     this.profile = { ...this.profile, ...profile };
     const name = roomChannel(code);
     this.channel = name;
@@ -250,7 +262,7 @@ export class ShootoutSession {
     this.channel = name;
     this.deadline = timeoutMs > 0 ? this.now() + timeoutMs : 0;
     this.remainingMs = timeoutMs;
-    this.openChannel(name, this.meta({ mode: this.mode }));
+    this.openChannel(name, this.meta({ mode: this.mode, tag: this.sessionTag }));
     if (timeoutMs > 0) {
       this.waitTimer = this.schedule(() => {
         this.waitTimer = null;
@@ -289,6 +301,8 @@ export class ShootoutSession {
           countryCode: member.countryCode || 'JP',
           pro: Boolean(member.pro),
           level: member.level || 'normal',
+          /* Build 11: 相手の試合ごとの目印（試合チャンネル名に使う） */
+          tag: member.tag ? String(member.tag).slice(0, 8) : '',
         };
       })
       .sort((a, b) => String(a.key).localeCompare(String(b.key)));
@@ -312,13 +326,39 @@ export class ShootoutSession {
     this.emit({ type: 'waiting', present: keys.length, remainingMs: this.remainingMs });
   }
 
+  /** 在室の一覧から相手の目印を取る */
+  tagOf(key) {
+    const member = this.presence.find((entry) => entry.key === key);
+    return member && member.tag ? String(member.tag) : '';
+  }
+
+  /**
+   * 相手と組む。
+   * Build 11: 試合チャンネル名は毎試合一意（2人のID + 試合ごとの目印）なので、
+   * 名前を決められるのは先に組む側（IDが小さい＝ホスト）だけ。もう一方は
+   * `pair` で渡された部屋名をそのまま使う（presence の目印がまだ届いていない
+   * 場合に別々の名前を作ってすれ違うのを防ぐ）。
+   */
   pairWith(partnerKey, { initiator = false, room = null } = {}) {
-    if (!partnerKey || this.matchName) return;
-    const name = typeof room === 'string' && room.startsWith('shootout-match:')
-      ? room
-      : matchChannel(this.client.clientId, partnerKey);
+    if (!partnerKey || this.matchName) return null;
+    const given = typeof room === 'string' && room.startsWith('shootout-match:') ? room : null;
+    if (!given && !initiator) {
+      /* 相手（先に組む側）から部屋名が届くのを待つ。待つ間も待機部屋には残る */
+      this.candidate = { key: partnerKey, tag: this.tagOf(partnerKey) };
+      this.waitingChannel = this.channel;
+      this.armWaitRelease();
+      this.emit({ type: 'waiting', present: this.presence.length, remainingMs: this.remainingMs });
+      return null;
+    }
+    const name = given || matchChannel(
+      this.client.clientId,
+      partnerKey,
+      this.sessionTag,
+      this.tagOf(partnerKey),
+    );
     this.matchName = name;
-    this.matchToken = randomToken(this.random);
+    this.matchToken = this.sessionTag || name.slice(-8);
+    this.candidate = null;
     this.host = this.client.clientId < partnerKey;
     this.mySide = this.host ? 'home' : 'away';
     if (this.waitTimer) {
@@ -367,7 +407,6 @@ export class ShootoutSession {
         }
       }
     }
-    this.startPresenceBeat(name);
     this.emit({ type: 'paired', host: this.host, opponent: this.opponent, room: name });
     this.client.onStatus = null;
     if (this.matchWatchdog) this.clear(this.matchWatchdog);
@@ -427,9 +466,10 @@ export class ShootoutSession {
   }
 
   /**
-   * 待機部屋を離れるタイマー（Build 10）。
+   * 待機部屋を離れるタイマー。
    * 相手がまだ試合部屋に現れていなければ、2.5秒ごとにもう一度待つ（最大3回）。
    * 先に切ってしまうと、相手は在室の更新を受け取れずに待ち続ける。
+   * まだ部屋名が届いていない（相手が先に組む側）なら、そのたびに pair を頼み直す。
    */
   armWaitRelease(delay = this.waitLingerMs) {
     if (!this.waitingChannel) return;
@@ -444,41 +484,26 @@ export class ShootoutSession {
         this.armWaitRelease();
         return;
       }
+      /* まだ部屋名が届いていない（相手が先に組む側）→ もう一度 pair を頼む */
+      if (!this.matchName && this.candidate && this.waitLingerRounds < WAIT_LINGER_ROUNDS) {
+        this.client.broadcast(this.waitingChannel, 'pair', {
+          from: this.client.clientId,
+          to: this.candidate.key,
+          ask: true,
+        });
+        this.armWaitRelease();
+        return;
+      }
       this.releaseWaiting();
     }, delay);
   }
 
-  /** 試合中、自分の在室を定期的に言い直す（残像の leave で消されても戻す） */
-  startPresenceBeat(name) {
-    this.stopPresenceBeat();
-    if (!(this.presenceBeatMs > 0)) return;
-    const beat = () => {
-      this.presenceBeatTimer = null;
-      if (!this.matchName || this.leftNotified) return;
-      this.retrackMatch();
-      this.presenceBeatTimer = this.schedule(beat, this.presenceBeatMs);
-    };
-    this.presenceBeatTimer = this.schedule(beat, this.presenceBeatMs);
-  }
-
-  stopPresenceBeat() {
-    if (this.presenceBeatTimer) this.clear(this.presenceBeatTimer);
-    this.presenceBeatTimer = null;
-  }
-
-  /** 試合部屋で自分の在室（presence）を送り直す。同じ内容でも送る */
-  retrackMatch() {
-    const name = this.matchName;
-    if (!name) return false;
-    const meta = this.meta({ mode: 'match', token: this.matchToken });
-    this.trackMeta = this.trackMeta || new Map();
-    this.trackMeta.set(name, meta);
-    if (typeof this.client.retrack === 'function') return this.client.retrack(name, meta);
-    if (typeof this.client.track === 'function') return this.client.track(name, meta);
-    return false;
-  }
-
-  /** 相手が在室から消えたときに「本当に退出か」を確かめる（Build 10） */
+  /**
+   * 相手が在室から消えたときに「本当に退出か」を確かめる。
+   * Build 11: 在室（presence）の送り直しはしない（Realtime の presence は
+   * レート制限があり、連射するとチャンネルごとサーバーに閉じられる）。
+   * 「こちらに居る」の hello を1回だけ送り、在室が戻るか応答があれば取り消す。
+   */
   scheduleOpponentLeftCheck() {
     if (this.leftNotified) return;
     if (this.leaveTimer) return;
@@ -486,8 +511,6 @@ export class ShootoutSession {
       this.finishOpponentLeft();
       return;
     }
-    /* 在室が残像の leave で消されただけなら、言い直して戻す */
-    this.retrackMatch();
     /* 相手が居るなら hello か在室が返る（届けば猶予を取り消す） */
     this.pingMatch();
     this.leaveTimer = this.schedule(() => {
@@ -531,8 +554,8 @@ export class ShootoutSession {
     }
     /* 自分が先に入った直後は、相手がまだ来ていないだけ。退出とは違う */
     if (!this.opponentSeen || !this.started || this.leftNotified) return;
-    /* Build 10: 消えた瞬間には決めない。前のセッションの leave（残像）なら
-       数秒で在室が戻るので、猶予の間に相手から届いたら取り消す */
+    /* 消えた瞬間には決めない。瞬断で在室が一瞬消えることがあるので、
+       猶予の間に相手から何か届けば取り消す */
     this.scheduleOpponentLeftCheck();
   }
 
@@ -553,13 +576,29 @@ export class ShootoutSession {
     if (!payload || typeof payload !== 'object') return;
     if (payloadTooLarge(payload)) return;
     const mine = this.client.clientId;
-    if (name !== this.channel) {
-      if (event === 'pair' && payload.to === mine && !this.matchName) {
-        const from = typeof payload.from === 'string' ? payload.from : '';
-        if (from) this.pairWith(from, { initiator: false, room: payload.room });
+    /*
+     * `pair` は待機部屋から届く（試合部屋に切り替えたあとは name !== channel になる）。
+     * どちらのチャンネルで届いても、自分宛てなら部屋名を使うか渡す。
+     */
+    if (event === 'pair' && payload.to === mine) {
+      const from = typeof payload.from === 'string' ? payload.from : '';
+      if (!from) return;
+      if (!this.matchName) {
+        /* 先に組んだ側が決めた、この試合だけの部屋名をそのまま使う */
+        this.pairWith(from, { initiator: false, room: payload.room });
+        return;
+      }
+      /* 部屋名が届かなかった相手の頼みに、もう一度だけ部屋名を伝える */
+      if (payload.ask && typeof payload.room !== 'string') {
+        this.client.broadcast(name, 'pair', {
+          from: mine,
+          to: from,
+          room: this.matchName,
+        });
       }
       return;
     }
+    if (name !== this.channel) return;
 
     if (event === 'hello') {
       if (payload.from === mine) return;
@@ -790,10 +829,9 @@ export class ShootoutSession {
     if (this.revealTimer) this.clear(this.revealTimer);
     if (this.matchWatchdog) this.clear(this.matchWatchdog);
     if (this.waitLinger) this.clear(this.waitLinger);
-    /* Build 10: pair の再送・退出の猶予・在室の言い直しも残さない */
+    /* 試合ごとの目印・pair の再送・退出の猶予も残さない（在室の連射はしない） */
     for (const id of this.pairTimers || []) this.clear(id);
     if (this.leaveTimer) this.clear(this.leaveTimer);
-    this.stopPresenceBeat();
     this.pairTimers = [];
     this.leaveTimer = null;
     this.waitTimer = null;
@@ -804,6 +842,8 @@ export class ShootoutSession {
     this.waitLingerRounds = 0;
     this.channel = null;
     this.matchToken = '';
+    this.sessionTag = '';
+    this.candidate = null;
     this.lastHelloAt = 0;
     this.lastOpponentContactAt = 0;
     this.matchName = null;

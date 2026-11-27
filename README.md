@@ -1,6 +1,6 @@
 # SHOOTOUT 4 — IPKSF World Penalty Championship
 
-iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 10）。
+iPhone 縦持ちのPK対決ゲーム（v1.0.0 / Build 11）。
 `クイック対戦`・`CPU対戦`・`フレンド対戦`・`世界ランキング`・`ロッカー（キャラクター＋4部位）`・
 `IPKSF 公式加盟（PRO・買い切り ¥300）` を、Capacitor 8 + 素の HTML/CSS/JS（ES Modules）で実装しています。
 
@@ -148,6 +148,15 @@ npx cap sync ios            # www → ios/App/App/public
 
 ## バージョン
 
+- v1.0.0 / Build 11（2026-11-28）
+  - **通信が途中でフリーズする真因を修正（presence のレート制限）**：Build 10 で入れた「3秒ごとに自分の在室（presence track）を送り直す」処理が Supabase Realtime の `Client presence rate limit exceeded` に当たり、サーバーから試合チャンネルを `phx_close` で強制切断されていた。送り直し（`startPresenceBeat` / `retrackMatch`）を完全に廃止し、`presence track` はチャンネル `joined` 時の1回だけにした
+  - **試合チャンネル名を毎試合一意に**：`shootout-match:{id~tag-id~tag}`。クイック・ルームとも開始時に4文字の `sessionTag` を作り、待機部屋の在室に載せて、2人のIDと目印から毎回違う名前を作る。前の試合の `phx_leave`（在室の `leaves`）が新しい試合部屋に届くことが物理的に起きなくなった（Build 10 で在室を送り直さざるを得なかった原因そのもの）
+  - **名前を決めるのは先に組む側（IDが小さい＝ホスト）だけ**：もう一方は `pair` で渡された部屋名をそのまま使う。目印がまだ届いていないうちに別々の名前を作ってすれ違うのを防ぐ（`pair` の再送 400ms/1200ms と `reset()` での clear は維持。2.5秒の待機延長のたびに `pair` を頼み直す）
+  - **`phx_close` 耐性**：`realtime.js` が現役のトピックをサーバーに閉じられたら `joined = false` にして、短い遅延（0.4秒〜、最大8回）から `phx_join` し直す。入り直すと在室を1回だけ送り直し、`hello` と未解決の手も送り直す（サイレント死を残さない）
+  - **組んだ直後に相手が抜けたときのフリーズを修正**：`paired` から試合開始までの1100msの間に `opponent-left` が来たら、予約を取り消して `online.opponent = null` / `searching = false` / `status = 相手が退出しました` に戻し、死んだ試合へ遷移しない
+  - **ミスキックでその1本が解決しないフリーズを修正**：`resolveKick` が「枠外（MISS）のときはキーパーの手が無い（`save = null`）」場合も `invalid save` で例外を投げていた。通信対戦では枠外の判定に `save: null` を渡すため、時間切れで枠外になると、例外が `emit` の try/catch に飲まれて1本が解決しないまま止まっていた（`presence` のレート制限で時間切れが増えると必ず踏む）。枠外のときは `save` を検証しないようにした
+  - **同じチャンネルを二重に join しない**：`onopen` の途中で購読されたチャンネルを、同じループの続きがもう一度 join して在室を2回送っていた（存在の二重送信を防ぐ）
+  - 本番 Supabase へ Playwright 2ブラウザで実測：クイックマッチ→3本目（`3`）まで、時間切れの枠外も含めて4本目まで、連続クイックマッチ→2本目、ルーム対戦→3本目までフリーズなし。WebSocket 192フレーム中、`Client presence rate limit exceeded` と予期せぬ `phx_close` は **0件**（在室の送信は待機部屋も試合部屋も1人1回ずつ）
 - v1.0.0 / Build 10（2026-11-27）
   - **クイックマッチが合流できない不具合を修正**：Build 9 で入れた「相手を在室（presence）や `hello` で見たら待機部屋をすぐ離れる」処理が、クイックマッチの合流とすれ違っていた。待機部屋は相手を見た瞬間には切らず、`WAIT_LINGER`（2.5秒）のタイマーでだけ離れる（相手が試合部屋に現れないあいだは2.5秒ずつ最大3回まで延長）。`pair` の再送タイマーも `reset()` で確実に消す
   - **やり直し直後の「相手が退出しました」誤爆を修正**：対戦チャンネル名は2人のIDから決まる固定名なので、1回目を終えてすぐ2回目を始めると、前のセッションの `phx_leave`（在室の `leaves`）が遅れて届き、0.9秒ほどで `opponent-left` を出して試合を落としていた。在室から相手が消えても即断せず、`OPPONENT_LEFT_GRACE_MS`（4.5秒）のあいだに相手から何か届けば取り消す。待つあいだに自分の在室を言い直し（`retrack`）、`hello` で呼びかける。試合中は3秒ごとに在室を送り直して、消された在室を戻す
